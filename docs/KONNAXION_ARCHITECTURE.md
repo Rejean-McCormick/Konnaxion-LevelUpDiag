@@ -11,7 +11,7 @@
 | N04 | API Contracts | scanners endpoints et OpenAPI |
 | N05 | Runtime & Browser | HTTP local + Playwright smoke |
 | N06 | Jobs / Redis / Celery | tests de tasks + probe runtime configurable |
-| N07 | Security & Auth | Django deploy check + security gate Capsule Manager |
+| N07 | Security & Auth | Django deploy check + common-auth policy tests + security gate Capsule Manager |
 | N08 | Capsule Local | Manager, healthcheck engine, capsule hash |
 | N09 | Deployed Runtime | DNS/HTTPS et deep diagnostic optionnel |
 | N10 | Deep Scan | full-scan frontend + pytest complet backend |
@@ -33,3 +33,16 @@ Tous les niveaux N01..N11 dépendent logiquement de N00. Les campagnes Konnaxion
 ## Pourquoi les outils restent dans leurs repos
 
 Le pack ne recopie pas Jest, Playwright, Django, les tests métier ou les healthchecks Capsule Manager. Il appelle les surfaces natives et normalise leurs résultats en Findings LevelUpDiag. Les scripts purement diagnostiques existants peuvent rester là où ils sont ou migrer graduellement vers ce pack.
+
+## Common authentication contract
+
+LevelUpDiag treats Konnaxion authentication as a standalone-first contract:
+
+```text
+local django-allauth login
++ optional OpenID Connect federation
++ issuer/sub external identity
++ local Konnaxion authorization
+```
+
+N04 statically checks the OIDC/allauth, CSRF, same-origin, legacy-token and Auth0-residue surfaces. N07 runs the canonical `konnaxion/users/tests/test_auth_policy.py` suite in the target backend environment.

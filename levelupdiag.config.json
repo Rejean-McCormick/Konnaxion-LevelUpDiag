@@ -153,6 +153,13 @@
       "frontend_runtime_start": [
         "pnpm",
         "dev"
+      ],
+      "backend_auth_policy": [
+        "python",
+        "-m",
+        "pytest",
+        "konnaxion/users/tests/test_auth_policy.py",
+        "-q"
       ]
     },
     "remote": {

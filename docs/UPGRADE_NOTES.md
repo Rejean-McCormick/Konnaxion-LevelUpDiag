@@ -15,3 +15,11 @@ N11 previously treated all N01..N10 as expected even for focused campaigns. N00 
 ## Compatibility
 
 `scripts/run_konnaxion.py <campaign>` still works. New direct CLI usage is `python levelupdiag.py run <campaign>`.
+
+## 3.1.0 — Common authentication alignment (2026-09-11)
+
+- N04 audits Konnaxion standalone-first django-allauth/OIDC source invariants.
+- N07 runs `konnaxion/users/tests/test_auth_policy.py`.
+- `auth-debug` now includes N07.
+- Legacy DRF password-token and Auth0 residue are surfaced explicitly.
+- Production CSRF, admin-allauth and same-origin API conventions are checked.

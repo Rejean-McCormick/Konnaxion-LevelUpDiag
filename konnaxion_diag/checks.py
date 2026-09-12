@@ -329,6 +329,59 @@ def contracts(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     findings.append(Finding("kx.contract.forbidden-namespaces", FAIL if audit["forbidden"] else PASS, f"Forbidden legacy API calls: {len(audit['forbidden'])}", "contract", evidence=str(audit["forbidden"][:30])))
     findings.append(Finding("kx.contract.csrf-risk", WARN if audit["csrf_risk_files"] else PASS, f"Mutation files requiring CSRF review: {len(audit['csrf_risk_files'])}", "auth", evidence=str(audit["csrf_risk_files"][:30]), recommendation="Review raw mutation fetches. Calls through apiFetch/apiPost/apiPut/apiPatch/apiDelete or services/_request are treated as CSRF-aware." if audit["csrf_risk_files"] else None))
     findings.append(Finding("kx.contract.unmapped", WARN if audit["unmapped"] else PASS, f"Frontend endpoints not mapped to discovered backend prefixes: {len(audit['unmapped'])}", "contract", evidence=str(audit["unmapped"][:40])))
+
+    auth = audit["auth_contract"]
+    findings.append(Finding(
+        "kx.auth.oidc-contract",
+        PASS if auth["allauth_oidc_provider"] and auth["oidc_uid_sub"] and auth["oidc_optional"] else FAIL,
+        "Common OIDC contract is present and optional." if auth["allauth_oidc_provider"] and auth["oidc_uid_sub"] and auth["oidc_optional"] else "Common OIDC contract is incomplete.",
+        "auth",
+        evidence=str({k: auth[k] for k in ("allauth_oidc_provider", "oidc_uid_sub", "oidc_optional")}),
+    ))
+    findings.append(Finding(
+        "kx.auth.identity-link-policy",
+        PASS if auth["email_auto_connect_disabled"] else FAIL,
+        "Email auto-linking is disabled; external identity is not merged by email." if auth["email_auto_connect_disabled"] else "Email-based social-account auto-linking is not clearly disabled.",
+        "auth",
+    ))
+    findings.append(Finding(
+        "kx.auth.local-login",
+        PASS if auth["accounts_route"] else FAIL,
+        "Local django-allauth account routes remain available." if auth["accounts_route"] else "Local django-allauth account route is missing.",
+        "auth",
+    ))
+    findings.append(Finding(
+        "kx.auth.interactive-policy",
+        PASS if auth["interactive_policy"] else FAIL,
+        "Interactive-login policy for human/service/klone accounts is present." if auth["interactive_policy"] else "Interactive-login policy is missing or not enforced by the account adapter.",
+        "auth",
+    ))
+    findings.append(Finding(
+        "kx.auth.legacy-token-endpoint",
+        FAIL if auth["legacy_token_endpoint"] else PASS,
+        "Legacy DRF username/password auth-token endpoint is still exposed." if auth["legacy_token_endpoint"] else "Legacy DRF username/password auth-token endpoint is absent.",
+        "auth",
+    ))
+    findings.append(Finding(
+        "kx.auth.auth0-residue",
+        WARN if auth["auth0_residue"] else PASS,
+        "Legacy Auth0 frontend residue remains." if auth["auth0_residue"] else "Legacy Auth0 frontend scaffolding is absent.",
+        "auth",
+        evidence=str(auth["auth0_residue"]) if auth["auth0_residue"] else None,
+    ))
+    findings.append(Finding(
+        "kx.auth.browser-session-contract",
+        PASS if auth["csrf_browser_contract"] and auth["admin_allauth"] and auth["same_origin_api"] else FAIL,
+        "Production browser auth contract is coherent: secure session/CSRF path, allauth admin, same-origin API." if auth["csrf_browser_contract"] and auth["admin_allauth"] and auth["same_origin_api"] else "Production browser auth contract is incomplete.",
+        "auth",
+        evidence=str({k: auth[k] for k in ("csrf_browser_contract", "admin_allauth", "same_origin_api")}),
+    ))
+    findings.append(Finding(
+        "kx.auth.oidc-dependencies",
+        PASS if auth["requirements_oidc"] else FAIL,
+        "Backend requirements include django-allauth socialaccount/OIDC dependencies." if auth["requirements_oidc"] else "Backend requirements do not clearly include the django-allauth socialaccount extra.",
+        "auth",
+    ))
     return make_result(level_id, level_name, started, findings, output="\n\n".join(outputs), metadata={**session_metadata(config), "cwd": str(paths["root"]), "source_audit": audit})
 
 
@@ -528,6 +581,20 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     started=now(); paths=target_paths(config); findings=[]; outputs=[]; backend_dir=paths["backend"]; assert backend_dir is not None
     cmd=command_value(config,"django_deploy_check") or ["python","manage.py","check","--deploy"]
     finding,step=command_probe(config,finding_id="kx.security.django-deploy-check",label="Django deploy security check",command=cmd,cwd=backend_dir,timeout=300,optional=True)
+    findings.append(finding)
+    if step: outputs.append(step.output_tail)
+
+    cmd=command_value(config,"backend_auth_policy") or ["python","-m","pytest","konnaxion/users/tests/test_auth_policy.py","-q"]
+    finding,step=command_probe(
+        config,
+        finding_id="kx.security.auth-policy-tests",
+        label="Konnaxion common-auth policy tests",
+        command=cmd,
+        cwd=backend_dir,
+        timeout=300,
+        optional=False,
+        recommendation="Restore/run konnaxion/users/tests/test_auth_policy.py and align the local allauth/OIDC policy.",
+    )
     findings.append(finding)
     if step: outputs.append(step.output_tail)
     cm=paths["capsule_manager"]

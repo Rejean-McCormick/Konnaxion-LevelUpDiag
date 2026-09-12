@@ -27,6 +27,7 @@ It scores Konnaxion markers (`frontend`, `backend`, `package.json`, `manage.py`)
 - Exact Konnaxion taxonomy N00..N11.
 - Existing Django, Next, TypeScript, ESLint, Jest, OpenAPI, Playwright, Celery/Redis, Capsule Manager and deployed-runtime diagnostics.
 - Static source audit: double `/api/api`, forbidden legacy namespaces, CSRF-risk and unmapped endpoint checks.
+- Common-auth audit: django-allauth/OIDC (`issuer + sub`), local-login preservation, no email auto-link, interactive human/service/klone policy, CSRF/same-origin production contract, legacy token/Auth0 cleanup.
 - `.venv` Python autodetection and `corepack pnpm` fallback.
 - Remote diagnostics disabled by default and no destructive deployment/restart/restore operations.
 - Original ordered campaigns.
@@ -108,3 +109,7 @@ Les anciens alias `MegaPack` ont été retirés du root et sont supprimés lors 
 - `INSTALL_MEGAPACK.ps1`
 
 Les noms LevelUpDiag v3 sont désormais les seules entrées d'installation/configuration conservées.
+
+## Authentication diagnostic
+
+The `auth-debug` campaign now validates the Konnaxion common identity implementation. It does not require OIDC to be enabled: federation is optional by design. It requires the OIDC capability to be correctly declared while local django-allauth login remains available.

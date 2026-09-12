@@ -1,9 +1,9 @@
 {
   "schema": "levelupdiag.manifest.v2",
   "standard": "LevelUpDiag",
-  "standard_version": "2.0.0-konnaxion",
+  "standard_version": "2.1.0-konnaxion",
   "suite_name": "Konnaxion LevelUpDiag — Upgraded",
-  "suite_version": "3.0.1",
+  "suite_version": "3.1.0",
   "repository_mode": "copy-in-or-standalone-diagnostics-suite",
   "control_dir_default": ".levelupdiag",
   "retention_default": "current_only",
@@ -124,7 +124,7 @@
       ],
       "timeout_seconds": 900,
       "parallel_safe": false,
-      "purpose": "Run Django deploy checks and Capsule Manager security-gate tests."
+      "purpose": "Validate Django deployment security plus the Konnaxion standalone-first allauth/OIDC authentication contract."
     },
     {
       "id": "N08",
@@ -199,7 +199,7 @@
       ]
     },
     "auth-debug": {
-      "description": "Focused authentication/connection path through backend, frontend, contracts and browser smoke.",
+      "description": "Focused Konnaxion auth path: backend, frontend, API/auth contracts, browser smoke and common-auth security policy.",
       "execution": "sequential",
       "levels": [
         "N00",
@@ -207,6 +207,7 @@
         "N03",
         "N04",
         "N05",
+        "N07",
         "N11"
       ]
     },

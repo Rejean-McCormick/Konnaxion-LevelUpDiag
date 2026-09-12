@@ -84,6 +84,98 @@ def _uses_csrf_safe_client(code: str) -> bool:
         return True
     return False
 
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def auth_contract_audit(frontend: Path, backend: Path) -> dict:
+    """Static audit of Konnaxion's standalone-first common-auth contract."""
+    base_settings = _read_text(backend / "config/settings/base.py")
+    prod_settings = _read_text(backend / "config/settings/production.py")
+    urls = _read_text(backend / "config/urls.py")
+    models = _read_text(backend / "konnaxion/users/models.py")
+    adapters = _read_text(backend / "konnaxion/users/adapters.py")
+    requirements = _read_text(backend / "requirements/base.txt")
+    frontend_package = _read_text(frontend / "package.json")
+    frontend_prod_env = _read_text(frontend / "env.production.example")
+
+    auth0_paths = [
+        frontend / "lib/auth0.ts",
+        frontend / "components/auth0-components/index.tsx",
+        frontend / "app/providers/AuthProvider.tsx",
+    ]
+    auth0_residue = [
+        str(path.relative_to(frontend))
+        for path in auth0_paths
+        if path.exists()
+    ]
+    if "@auth0/" in frontend_package:
+        auth0_residue.append("package.json:@auth0")
+
+    return {
+        "allauth_oidc_provider": (
+            "allauth.socialaccount.providers.openid_connect" in base_settings
+            and '"openid_connect"' in base_settings
+        ),
+        "oidc_uid_sub": bool(
+            re.search(r'["\']uid_field["\']\s*:\s*["\']sub["\']', base_settings)
+        ),
+        "oidc_optional": bool(
+            re.search(r"COMMON_OIDC_ENABLED\s*=\s*env\.bool\(", base_settings)
+            and re.search(r"SOCIALACCOUNT_ONLY\s*=\s*False", base_settings)
+        ),
+        "email_auto_connect_disabled": bool(
+            re.search(r"SOCIALACCOUNT_EMAIL_AUTHENTICATION\s*=\s*False", base_settings)
+            and re.search(
+                r"SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT\s*=\s*False",
+                base_settings,
+            )
+        ),
+        "accounts_route": (
+            'path("accounts/", include("allauth.urls"))' in urls
+            or "path('accounts/', include('allauth.urls'))" in urls
+        ),
+        "legacy_token_endpoint": bool(
+            re.search(r"\bobtain_auth_token\b|api/auth-token", urls, re.I)
+        ),
+        "interactive_policy": (
+            "def can_interactive_login" in models
+            and "user.can_interactive_login" in adapters
+        ),
+        "csrf_browser_contract": bool(
+            re.search(r"CSRF_COOKIE_SECURE\s*=\s*True", prod_settings)
+            and re.search(r"CSRF_COOKIE_HTTPONLY\s*=\s*False", prod_settings)
+            and re.search(
+                r'CSRF_COOKIE_NAME\s*=\s*["\']csrftoken["\']',
+                prod_settings,
+            )
+        ),
+        "admin_allauth": bool(
+            re.search(r"DJANGO_ADMIN_FORCE_ALLAUTH\s*=\s*True", prod_settings)
+        ),
+        "same_origin_api": bool(
+            re.search(
+                r"^\s*NEXT_PUBLIC_API_BASE\s*=\s*/api\s*$",
+                frontend_prod_env,
+                re.M,
+            )
+        ),
+        "requirements_oidc": bool(
+            re.search(
+                r"django-allauth\[[^\]]*socialaccount[^\]]*\]",
+                requirements,
+                re.I,
+            )
+        ),
+        "auth0_residue": sorted(set(auth0_residue)),
+    }
+
+
 def audit(frontend: Path, backend: Path) -> dict:
     double=[]; forbidden=[]; mutations=[]; endpoints=set()
     for p in _files(frontend):
@@ -104,4 +196,4 @@ def audit(frontend: Path, backend: Path) -> dict:
         if ep.startswith(FORBIDDEN): continue
         if prefixes and not any(ep==p or ep.startswith(p.rstrip('/')+'/') for p in prefixes):
             unmapped.append(ep)
-    return {'double_api':double,'forbidden':forbidden,'csrf_risk_files':sorted(set(mutations)),'unmapped':unmapped,'backend_prefixes':sorted(prefixes),'frontend_endpoints':sorted(endpoints)}
+    return {'double_api':double,'forbidden':forbidden,'csrf_risk_files':sorted(set(mutations)),'unmapped':unmapped,'backend_prefixes':sorted(prefixes),'frontend_endpoints':sorted(endpoints),'auth_contract':auth_contract_audit(frontend, backend)}

@@ -144,7 +144,14 @@
         "pytest",
         "-q"
       ],
-      "remote_deep_diagnostic": []
+      "remote_deep_diagnostic": [],
+      "backend_auth_policy": [
+        "python",
+        "-m",
+        "pytest",
+        "konnaxion/users/tests/test_auth_policy.py",
+        "-q"
+      ]
     },
     "remote": {
       "enabled": false,
