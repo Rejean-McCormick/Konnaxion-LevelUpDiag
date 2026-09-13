@@ -4,3 +4,4 @@ levelupdiag.config.local.json
 .levelupdiag/
 *.log
 .DS_Store
+GitSink.bat
