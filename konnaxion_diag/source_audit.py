@@ -8,6 +8,21 @@ MUTATION = re.compile(r"\b(method\s*:\s*['\"](?:POST|PUT|PATCH|DELETE)['\"]|\.(?
 API_LITERAL = re.compile(r"['\"](/api/[A-Za-z0-9_./{}?&=:-]+)['\"]")
 ROUTE_REG = re.compile(r"register_(?:required|optional)\(\s*router\s*,\s*['\"]([^'\"]+)['\"]")
 
+WORLD_OWNED_API_PREFIXES = (
+    "/api/ethikos/",
+    "/api/deliberate/",
+    "/api/teambuilder/",
+    "/api/keenkonnect/",
+    "/api/konnected/",
+    "/api/kreative/",
+    "/api/kollective/",
+    "/api/v1/ekoh/",
+    "/api/v1/smart-vote/",
+    "/api/reports/",
+    "/api/admin/moderation/",
+    "/api/admin/konsensus-config/",
+)
+
 
 _EXCLUDED_DIRS={'.git','node_modules','.next','dist','build','coverage','artifacts','.venv','venv','__pycache__','.cache'}
 
@@ -177,16 +192,19 @@ def auth_contract_audit(frontend: Path, backend: Path) -> dict:
 
 
 def audit(frontend: Path, backend: Path) -> dict:
-    double=[]; forbidden=[]; mutations=[]; endpoints=set()
+    double=[]; forbidden=[]; mutations=[]; endpoints=set(); world_owned_unscoped=[]
     for p in _files(frontend):
         try: text=p.read_text(encoding='utf-8', errors='ignore')
         except OSError: continue
         rel=str(p.relative_to(frontend))
         code=_strip_js_comments(text)
         for ep in API_LITERAL.findall(code):
-            endpoints.add(ep.split('?')[0])
+            endpoint = ep.split('?')[0]
+            endpoints.add(endpoint)
             if '/api/api/' in ep: double.append((rel,ep))
             if ep.startswith(FORBIDDEN): forbidden.append((rel,ep))
+            if not endpoint.startswith('/api/w/') and endpoint.startswith(WORLD_OWNED_API_PREFIXES):
+                world_owned_unscoped.append((rel, endpoint))
         if MUTATION.search(code) and ('credentials' in code or 'apiFetch' in code or 'fetch(' in code or '.post(' in code or '.put(' in code or '.patch(' in code or '.delete(' in code):
             if not _uses_csrf_safe_client(code):
                 mutations.append(rel)
@@ -196,4 +214,4 @@ def audit(frontend: Path, backend: Path) -> dict:
         if ep.startswith(FORBIDDEN): continue
         if prefixes and not any(ep==p or ep.startswith(p.rstrip('/')+'/') for p in prefixes):
             unmapped.append(ep)
-    return {'double_api':double,'forbidden':forbidden,'csrf_risk_files':sorted(set(mutations)),'unmapped':unmapped,'backend_prefixes':sorted(prefixes),'frontend_endpoints':sorted(endpoints),'auth_contract':auth_contract_audit(frontend, backend)}
+    return {'double_api':double,'forbidden':forbidden,'csrf_risk_files':sorted(set(mutations)),'unmapped':unmapped,'world_owned_unscoped':sorted(set(world_owned_unscoped)),'backend_prefixes':sorted(prefixes),'frontend_endpoints':sorted(endpoints),'auth_contract':auth_contract_audit(frontend, backend)}

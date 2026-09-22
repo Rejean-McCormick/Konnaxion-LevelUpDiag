@@ -32,6 +32,7 @@ from .common import (
 )
 from .http_probe import probe as http_probe
 from .source_audit import audit as source_audit
+from .worlds_audit import audit_worlds, probe_worlds_control_plane, summarize_worlds_audit
 
 
 def _tool_candidates(name: str) -> list[str]:
@@ -55,6 +56,33 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b''):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _current_campaign(config: AppConfig) -> str:
+    session = active_session(config)
+    return str(session.get("campaign", "")) if session else os.environ.get("LEVELUPDIAG_CAMPAIGN", "")
+
+
+def _worlds_required(config: AppConfig) -> bool:
+    return _current_campaign(config) == "world-switch"
+
+
+def _worlds_focused(config: AppConfig) -> bool:
+    """True for the fast, Worlds-specific qualification campaign."""
+    return _current_campaign(config) == "world-switch"
+
+
+def _worlds_report(config: AppConfig) -> dict[str, Any]:
+    paths = target_paths(config)
+    frontend = paths["frontend"]
+    backend_dir = paths["backend"]
+    assert frontend is not None and backend_dir is not None
+    return audit_worlds(frontend, backend_dir)
+
+
+def _worlds_enabled_for_check(config: AppConfig, report: dict[str, Any] | None = None) -> bool:
+    current = report if report is not None else _worlds_report(config)
+    return bool(current.get("detected")) or _worlds_required(config)
 
 
 def discovery(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
@@ -100,6 +128,21 @@ def repository_static(config: AppConfig, level_id: str, level_name: str) -> Leve
     for rel in expected:
         path = root / rel
         findings.append(Finding(f"kx.repo.{rel.replace('/', '.').replace('_','-')}", PASS if path.is_file() else FAIL, f"Required repository surface {'present' if path.is_file() else 'missing'}: {rel}", "repository", path=str(path)))
+
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        missing = worlds.get("missing_files", [])
+        findings.append(Finding(
+            "kx.worlds.installation",
+            FAIL if missing else PASS,
+            "Konnaxion Worlds integration surfaces are complete." if not missing else f"Konnaxion Worlds integration is incomplete: {len(missing)} required surface(s) missing.",
+            "worlds",
+            evidence=summarize_worlds_audit(worlds),
+            recommendation="Apply/repair the WorldSwitch overlay before running the world-switch campaign." if missing else None,
+        ))
+    else:
+        findings.append(Finding("kx.worlds.installation", SKIP, "Konnaxion Worlds integration is not detected; Worlds-specific repository checks skipped.", "worlds"))
+
     git_cmd = ["git", "status", "--short"]
     finding, step = command_probe(config, finding_id="kx.repo.git-status", label="Git status", command=git_cmd, cwd=root, timeout=60, optional=True)
     findings.append(finding)
@@ -113,14 +156,36 @@ def backend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     specs = [
         ("kx.backend.django-check", "Django system check", "backend_check", ["python", "manage.py", "check"], False, 180),
         ("kx.backend.migrations", "Django migration drift check", "backend_migrations", ["python", "manage.py", "makemigrations", "--check", "--dry-run"], False, 240),
-        ("kx.backend.smoke", "Backend platform smoke tests", "backend_smoke", ["python", "-m", "pytest", "tests/test_smoke_platform.py", "-q"], False, 600),
     ]
+    # The focused Worlds campaign deliberately avoids the generic platform
+    # smoke suite; world-switch-validation runs full-local afterwards.
+    if not _worlds_focused(config):
+        specs.append(("kx.backend.smoke", "Backend platform smoke tests", "backend_smoke", ["python", "-m", "pytest", "tests/test_smoke_platform.py", "-q"], False, 600))
     for fid,label,key,default,opt,timeout in specs:
         cmd = command_value(config, key) or default
         finding, step = command_probe(config, finding_id=fid, label=label, command=cmd, cwd=backend_dir, timeout=timeout, optional=opt)
         findings.append(finding)
         if step: outputs.append(f"## {label}\n{step.output_tail}")
-    return make_result(level_id, level_name, started, findings, output="\n\n".join(outputs), metadata={**session_metadata(config), "cwd": str(backend_dir)})
+
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        cmd = command_value(config, "backend_worlds_tests") or [
+            "python", "-m", "pytest", "konnaxion/worlds/tests", "-q"
+        ]
+        finding, step = command_probe(
+            config,
+            finding_id="kx.worlds.backend-tests",
+            label="Konnaxion Worlds backend tests",
+            command=cmd,
+            cwd=backend_dir,
+            timeout=900,
+            optional=not _worlds_required(config),
+            recommendation="Run the bundled konnaxion/worlds test suite and resolve resolver/schema/release isolation failures.",
+        )
+        findings.append(finding)
+        if step: outputs.append(f"## Konnaxion Worlds backend tests\n{step.output_tail}")
+
+    return make_result(level_id, level_name, started, findings, output="\n\n".join(outputs), metadata={**session_metadata(config), "cwd": str(backend_dir), "worlds": worlds})
 
 
 def _capture_eslint_report(
@@ -243,13 +308,20 @@ def frontend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     outputs: list[str] = []
     assert frontend_dir is not None
 
-    specs = [
-        ("kx.frontend.typecheck", "TypeScript typecheck", "frontend_typecheck", ["pnpm", "exec", "tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"], False, 600),
-        # Warnings remain visible but do not make the level fail by themselves.
-        ("kx.frontend.eslint", "Frontend ESLint", "frontend_lint", ["pnpm", "exec", "eslint", "."], False, 600),
-        ("kx.frontend.jest", "Frontend Jest", "frontend_jest", ["pnpm", "exec", "jest", "--passWithNoTests", "--runInBand"], False, 900),
-        ("kx.frontend.build", "Next production build", "frontend_build", ["pnpm", "exec", "next", "build"], False, 1200),
-    ]
+    if _worlds_focused(config):
+        # Keep only compilation/build gates here. The dedicated Worlds Jest suite
+        # is added below; generic lint/Jest belong to the subsequent full-local.
+        specs = [
+            ("kx.frontend.typecheck", "TypeScript typecheck", "frontend_typecheck", ["pnpm", "exec", "tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"], False, 600),
+            ("kx.frontend.build", "Next production build", "frontend_build", ["pnpm", "exec", "next", "build"], False, 1200),
+        ]
+    else:
+        specs = [
+            ("kx.frontend.typecheck", "TypeScript typecheck", "frontend_typecheck", ["pnpm", "exec", "tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"], False, 600),
+            ("kx.frontend.eslint", "Frontend ESLint", "frontend_lint", ["pnpm", "exec", "eslint", "."], False, 600),
+            ("kx.frontend.jest", "Frontend Jest", "frontend_jest", ["pnpm", "exec", "jest", "--passWithNoTests", "--runInBand"], False, 900),
+            ("kx.frontend.build", "Next production build", "frontend_build", ["pnpm", "exec", "next", "build"], False, 1200),
+        ]
 
     eslint_report: dict[str, Any] = {}
     for fid, label, key, default, opt, timeout in specs:
@@ -294,9 +366,32 @@ def frontend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
                     + "\n".join(error_files)
                 )
 
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        cmd = command_value(config, "frontend_worlds_tests") or [
+            "pnpm", "exec", "jest",
+            "lib/__tests__/worlds.test.ts",
+            "routes/suites.test.ts",
+            "--runInBand",
+        ]
+        finding, step = command_probe(
+            config,
+            finding_id="kx.worlds.frontend-tests",
+            label="Konnaxion Worlds frontend routing tests",
+            command=cmd,
+            cwd=frontend_dir,
+            timeout=600,
+            optional=not _worlds_required(config),
+            recommendation="Keep World URL helpers and suite/sidebar ownership tests green before validating the switcher.",
+        )
+        findings.append(finding)
+        if step:
+            outputs.append(f"## Konnaxion Worlds frontend routing tests\n{step.output_tail}")
+
     metadata: dict[str, Any] = {
         **session_metadata(config),
         "cwd": str(frontend_dir),
+        "worlds": worlds,
     }
     if eslint_report:
         metadata["eslint"] = eslint_report
@@ -329,6 +424,30 @@ def contracts(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     findings.append(Finding("kx.contract.forbidden-namespaces", FAIL if audit["forbidden"] else PASS, f"Forbidden legacy API calls: {len(audit['forbidden'])}", "contract", evidence=str(audit["forbidden"][:30])))
     findings.append(Finding("kx.contract.csrf-risk", WARN if audit["csrf_risk_files"] else PASS, f"Mutation files requiring CSRF review: {len(audit['csrf_risk_files'])}", "auth", evidence=str(audit["csrf_risk_files"][:30]), recommendation="Review raw mutation fetches. Calls through apiFetch/apiPost/apiPut/apiPatch/apiDelete or services/_request are treated as CSRF-aware." if audit["csrf_risk_files"] else None))
     findings.append(Finding("kx.contract.unmapped", WARN if audit["unmapped"] else PASS, f"Frontend endpoints not mapped to discovered backend prefixes: {len(audit['unmapped'])}", "contract", evidence=str(audit["unmapped"][:40])))
+
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        protected = bool(worlds.get("frontend", {}).get("next_api_safety_net"))
+        legacy_literals = audit.get("world_owned_unscoped", [])
+        findings.append(Finding(
+            "kx.contract.world-owned-unscoped-literals",
+            PASS if protected else (FAIL if legacy_literals else PASS),
+            f"World-owned API literals protected by the canonical client/Next safety net: {len(legacy_literals)}" if protected else f"World-owned API literals without a verified scoping safety net: {len(legacy_literals)}",
+            "worlds",
+            evidence=str(legacy_literals[:40]),
+            recommendation="Normalize legacy call-sites onto the canonical World-aware API client over time; the verified same-origin middleware currently protects them." if protected and legacy_literals else ("Restore the World API scoping safety net before accepting legacy unscoped calls." if legacy_literals else None),
+        ))
+        for group in ("frontend", "backend", "jobs"):
+            values = worlds.get(group, {})
+            failed = [name for name, ok in values.items() if not ok]
+            findings.append(Finding(
+                f"kx.worlds.contract.{group}",
+                FAIL if failed else PASS,
+                f"Worlds {group} contract {'failed' if failed else 'is coherent'}.",
+                "worlds",
+                evidence=str(failed) if failed else str(sorted(values)),
+                recommendation="Repair the listed Worlds invariant(s) before accepting the overlay." if failed else None,
+            ))
 
     auth = audit["auth_contract"]
     findings.append(Finding(
@@ -382,7 +501,7 @@ def contracts(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         "Backend requirements include django-allauth socialaccount/OIDC dependencies." if auth["requirements_oidc"] else "Backend requirements do not clearly include the django-allauth socialaccount extra.",
         "auth",
     ))
-    return make_result(level_id, level_name, started, findings, output="\n\n".join(outputs), metadata={**session_metadata(config), "cwd": str(paths["root"]), "source_audit": audit})
+    return make_result(level_id, level_name, started, findings, output="\n\n".join(outputs), metadata={**session_metadata(config), "cwd": str(paths["root"]), "source_audit": audit, "worlds": worlds})
 
 
 
@@ -462,6 +581,8 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
     urls = section.get("local_urls", ["http://127.0.0.1:3000", "http://127.0.0.1:8000/api/"])
     findings: list[Finding] = []
     started_processes: list[subprocess.Popen[str] | None] = []
+    worlds: dict[str, Any] = {}
+    probe_report: dict[str, Any] = {}
 
     initial = {str(url): http_probe(str(url), timeout=3.0) for url in urls}
     needs_runtime = any(not result.ok for result in initial.values())
@@ -509,44 +630,68 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                     evidence=result.error or f"HTTP {result.status} {result.elapsed_ms}ms",
                 ))
 
-        seed_cmd = command_value(config, "ethikos_seed_workflow") or [
-            "python",
-            "manage.py",
-            "seed_ethikos_workflow",
-        ]
-        seed_finding, _seed_step = command_probe(
-            config,
-            finding_id="kx.runtime.ethikos-seed",
-            label="Ethikos workflow seed",
-            command=seed_cmd,
-            cwd=backend_dir,
-            timeout=300,
-            optional=True,
-            recommendation=(
-                "The authenticated Playwright workflow needs the canonical local "
-                "Ethikos seed data."
-            ),
-        )
-        findings.append(seed_finding)
+        worlds = _worlds_report(config)
+        if _worlds_enabled_for_check(config, worlds):
+            probe_report = probe_worlds_control_plane(config, paths)
+            for item in probe_report.get("findings", []):
+                findings.append(Finding(
+                    item["id"],
+                    item["severity"],
+                    item["message"],
+                    "worlds",
+                    path=item.get("path"),
+                    evidence=item.get("evidence"),
+                    recommendation=item.get("recommendation"),
+                ))
 
-        cmd = command_value(config, "playwright_smoke") or ["pnpm", "run", "smoke:gate"]
         playwright_timeout = int(section.get("playwright_smoke_timeout_seconds", 2400))
-        finding, step = command_probe(
-            config,
-            finding_id="kx.runtime.playwright-smoke",
-            label="Playwright smoke gate",
-            command=cmd,
-            cwd=frontend_dir,
-            timeout=playwright_timeout,
-            optional=True,
-            recommendation=(
-                "Inspect Playwright failures and retained current-run artifacts. "
-                "The smoke gate runs with SMOKE_GATE=1. "
-                "If the full route campaign legitimately needs more time, set "
-                "konnaxion.playwright_smoke_timeout_seconds."
-            ),
-        )
-        findings.append(finding)
+        step = None
+        if _worlds_focused(config):
+            findings.append(Finding(
+                "kx.runtime.playwright-smoke",
+                SKIP,
+                "Full Playwright smoke is deferred to full-local after the focused Worlds qualification.",
+                "runtime",
+                recommendation="Run world-switch-validation to execute full-local after Worlds gates pass.",
+            ))
+        else:
+            seed_cmd = command_value(config, "ethikos_seed_workflow") or [
+                "python",
+                "manage.py",
+                "seed_ethikos_workflow",
+            ]
+            seed_finding, _seed_step = command_probe(
+                config,
+                finding_id="kx.runtime.ethikos-seed",
+                label="Ethikos workflow seed",
+                command=seed_cmd,
+                cwd=backend_dir,
+                timeout=300,
+                optional=True,
+                recommendation=(
+                    "The authenticated Playwright workflow needs the canonical local "
+                    "Ethikos seed data."
+                ),
+            )
+            findings.append(seed_finding)
+
+            cmd = command_value(config, "playwright_smoke") or ["pnpm", "run", "smoke:gate"]
+            finding, step = command_probe(
+                config,
+                finding_id="kx.runtime.playwright-smoke",
+                label="Playwright smoke gate",
+                command=cmd,
+                cwd=frontend_dir,
+                timeout=playwright_timeout,
+                optional=True,
+                recommendation=(
+                    "Inspect Playwright failures and retained current-run artifacts. "
+                    "The smoke gate runs with SMOKE_GATE=1. "
+                    "If the full route campaign legitimately needs more time, set "
+                    "konnaxion.playwright_smoke_timeout_seconds."
+                ),
+            )
+            findings.append(finding)
         return make_result(
             level_id,
             level_name,
@@ -557,6 +702,9 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                 **session_metadata(config),
                 "autostarted_runtime": needs_runtime and autostart,
                 "playwright_smoke_timeout_seconds": playwright_timeout,
+                "worlds": worlds,
+                "worlds_runtime_probe": probe_report,
+                "focused_worlds_campaign": _worlds_focused(config),
             },
         )
     finally:
@@ -574,7 +722,17 @@ def jobs(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         finding,step=command_probe(config,finding_id=fid,label=label,command=cmd,cwd=backend_dir,timeout=timeout,optional=opt,recommendation="Configure konnaxion.commands.jobs_probe for live Redis/Celery verification." if key=="jobs_probe" else None)
         findings.append(finding)
         if step: outputs.append(step.output_tail)
-    return make_result(level_id,level_name,started,findings,output="\n".join(outputs),metadata={**session_metadata(config),"cwd":str(backend_dir)})
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        pinned = bool(worlds.get("jobs", {}).get("release_pinned_task_scope"))
+        findings.append(Finding(
+            "kx.worlds.jobs.release-pinned",
+            PASS if pinned else FAIL,
+            "World task scope pins world_id + release_id and rejects stale releases." if pinned else "World task scope is not clearly release-pinned/fail-closed.",
+            "worlds",
+            recommendation="Use world_task_scope(world_id, release_id) for World-owned mutation tasks." if not pinned else None,
+        ))
+    return make_result(level_id,level_name,started,findings,output="\n".join(outputs),metadata={**session_metadata(config),"cwd":str(backend_dir),"worlds":worlds})
 
 
 def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
@@ -597,6 +755,29 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     )
     findings.append(finding)
     if step: outputs.append(step.output_tail)
+
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        backend_contract = worlds.get("backend", {})
+        security_keys = (
+            "middleware_after_auth",
+            "transaction_local_search_path",
+            "unscoped_api_enforcement",
+            "data_plane_default_off",
+            "scoped_api_default_off",
+            "data_plane_fail_closed_503",
+            "response_world_headers",
+        )
+        failed = [key for key in security_keys if not backend_contract.get(key)]
+        findings.append(Finding(
+            "kx.worlds.security.fail-closed",
+            FAIL if failed else PASS,
+            "World isolation/security invariants are fail-closed." if not failed else "World fail-closed security invariants are incomplete.",
+            "worlds",
+            evidence=str(failed) if failed else ", ".join(security_keys),
+            recommendation="Do not enable the World data plane until all fail-closed invariants pass." if failed else None,
+        ))
+
     cm=paths["capsule_manager"]
     if cm and cm.is_dir():
         cmd=command_value(config,"capsule_security_tests") or ["python","-m","pytest","tests/test_security_gate.py","-q"]
@@ -605,7 +786,7 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         if step: outputs.append(step.output_tail)
     else:
         findings.append(Finding("kx.security.capsule-gate",WARN,"Capsule Manager security checks unavailable because its repository is not configured.","security"))
-    return make_result(level_id,level_name,started,findings,output="\n".join(outputs),metadata={**session_metadata(config),"cwd":str(paths["root"])})
+    return make_result(level_id,level_name,started,findings,output="\n".join(outputs),metadata={**session_metadata(config),"cwd":str(paths["root"]),"worlds":worlds})
 
 
 def capsule_local(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
@@ -704,6 +885,7 @@ def correlation(config: AppConfig, level_id: str, level_name: str) -> LevelResul
     if any(x.startswith("kx.contract.") for x in ids): hypotheses.append("frontend↔backend API contract mismatch")
     if any(x.startswith("kx.runtime.") for x in ids): hypotheses.append("local runtime/browser smoke failure")
     if any(x.startswith("kx.jobs.") for x in ids): hypotheses.append("Celery/Redis/background-job failure")
+    if any(x.startswith("kx.worlds.") for x in ids): hypotheses.append("Konnaxion Worlds routing/isolation/release failure")
     if any(x.startswith("kx.capsule.") for x in ids): hypotheses.append("capsule packaging/runtime-manager failure")
     if any(x.startswith("kx.remote.") for x in ids): hypotheses.append("deployed DNS/HTTP/Agent/runtime failure")
     if failures:
@@ -739,21 +921,52 @@ CHECKS = {
 
 def deep_scan(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     started=now(); paths=target_paths(config); findings=[]; outputs=[]; frontend=paths["frontend"]; assert frontend is not None
-    cmd=command_value(config,"frontend_full_scan")
-    if cmd is None:
-        script=frontend/"tools"/"full-scan.ps1"
-        if script.is_file():
-            shell="pwsh" if _find_tool("pwsh") else "powershell"
-            cmd=[shell,"-NoProfile","-ExecutionPolicy","Bypass","-File",str(script)]
-    finding,step=command_probe(config,finding_id="kx.deep.frontend-full-scan",label="Konnaxion full frontend diagnostic scan",command=cmd,cwd=frontend,timeout=2400,optional=True,recommendation="Keep frontend/tools/full-scan.ps1 or configure konnaxion.commands.frontend_full_scan.")
-    findings.append(finding)
-    if step: outputs.append(step.output_tail)
     backend_dir=paths["backend"]; assert backend_dir is not None
-    cmd=command_value(config,"backend_full_tests") or ["python","-m","pytest","-q"]
-    finding,step=command_probe(config,finding_id="kx.deep.backend-tests",label="Full backend pytest suite",command=cmd,cwd=backend_dir,timeout=2400,optional=True)
-    findings.append(finding)
-    if step: outputs.append(step.output_tail)
-    return make_result(level_id,level_name,started,findings,output="\n\n".join(outputs),metadata={**session_metadata(config),"cwd":str(paths["root"])})
+
+    # world-switch is a focused qualification. The expensive generic deep scan
+    # belongs to full-local, which world-switch-validation runs only after this
+    # campaign succeeds.
+    if not _worlds_focused(config):
+        cmd=command_value(config,"frontend_full_scan")
+        if cmd is None:
+            script=frontend/"tools"/"full-scan.ps1"
+            if script.is_file():
+                shell="pwsh" if _find_tool("pwsh") else "powershell"
+                cmd=[shell,"-NoProfile","-ExecutionPolicy","Bypass","-File",str(script)]
+        finding,step=command_probe(config,finding_id="kx.deep.frontend-full-scan",label="Konnaxion full frontend diagnostic scan",command=cmd,cwd=frontend,timeout=2400,optional=True,recommendation="Keep frontend/tools/full-scan.ps1 or configure konnaxion.commands.frontend_full_scan.")
+        findings.append(finding)
+        if step: outputs.append(step.output_tail)
+        cmd=command_value(config,"backend_full_tests") or ["python","-m","pytest","-q"]
+        finding,step=command_probe(config,finding_id="kx.deep.backend-tests",label="Full backend pytest suite",command=cmd,cwd=backend_dir,timeout=2400,optional=True)
+        findings.append(finding)
+        if step: outputs.append(step.output_tail)
+    else:
+        findings.append(Finding(
+            "kx.deep.generic-deferred",
+            SKIP,
+            "Generic frontend/full-backend deep scans are deferred to full-local.",
+            "worlds",
+        ))
+
+    worlds = _worlds_report(config)
+    if _worlds_enabled_for_check(config, worlds):
+        cmd = command_value(config, "backend_worlds_isolation_tests") or [
+            "python", "-m", "pytest", "konnaxion/worlds/tests/test_multiworld_isolation.py", "-q"
+        ]
+        finding, step = command_probe(
+            config,
+            finding_id="kx.worlds.deep-isolation",
+            label="Multi-World isolation test",
+            command=cmd,
+            cwd=backend_dir,
+            timeout=900,
+            optional=not _worlds_required(config),
+            recommendation="Validate Alpha/Beta schema and release isolation on PostgreSQL before enabling the data plane.",
+        )
+        findings.append(finding)
+        if step: outputs.append(step.output_tail)
+
+    return make_result(level_id,level_name,started,findings,output="\n\n".join(outputs),metadata={**session_metadata(config),"cwd":str(paths["root"]),"worlds":worlds})
 
 CHECKS["N10"] = deep_scan
 CHECKS["N11"] = correlation

@@ -151,6 +151,28 @@
         "pytest",
         "konnaxion/users/tests/test_auth_policy.py",
         "-q"
+      ],
+      "backend_worlds_tests": [
+        "python",
+        "-m",
+        "pytest",
+        "konnaxion/worlds/tests",
+        "-q"
+      ],
+      "frontend_worlds_tests": [
+        "pnpm",
+        "exec",
+        "jest",
+        "lib/__tests__/worlds.test.ts",
+        "routes/suites.test.ts",
+        "--runInBand"
+      ],
+      "backend_worlds_isolation_tests": [
+        "python",
+        "-m",
+        "pytest",
+        "konnaxion/worlds/tests/test_multiworld_isolation.py",
+        "-q"
       ]
     },
     "remote": {
@@ -160,6 +182,13 @@
       "http_timeout_seconds": 10,
       "allow_insecure_tls": false,
       "deep_timeout_seconds": 1800
+    },
+    "worlds": {
+      "architecture_lock": "KX-WORLDS-1",
+      "backend_api_base_url": "",
+      "http_timeout_seconds": 5,
+      "runtime_probe_world_key": "",
+      "data_plane_probe_path": "ethikos/"
     }
   },
   "execution": {

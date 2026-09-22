@@ -23,3 +23,17 @@ N11 previously treated all N01..N10 as expected even for focused campaigns. N00 
 - `auth-debug` now includes N07.
 - Legacy DRF password-token and Auth0 residue are surfaced explicitly.
 - Production CSRF, admin-allauth and same-origin API conventions are checked.
+
+## 3.2.0 — Worlds-aware qualification (2026-09-22)
+
+- Added `world-switch` campaign while retaining the exact N00..N11 taxonomy.
+- N01 detects incomplete World Switch overlay surfaces.
+- N02 runs `konnaxion/worlds/tests` when Worlds is present and requires it in the focused campaign.
+- N03 runs the dedicated World URL/sidebar routing Jest tests.
+- N04 audits URL authority, API scoping, stale response guards, Next safety-net routing, backend runtime/middleware contracts and release-pinned task support.
+- N05 probes Worlds control-plane liveness/readiness and optionally a configured promoted World without mutating the catalog.
+- N06 validates release-pinned `world_id + release_id` task scope.
+- N07 validates fail-closed data-plane/security invariants.
+- N10 runs the Alpha/Beta multi-World isolation test explicitly.
+- N11 recognizes Worlds routing/isolation/release failures as a dedicated correlation hypothesis.
+- Existing campaigns remain ordered and compatible.

@@ -11,3 +11,5 @@ class ManifestTests(unittest.TestCase):
         m=load_manifest(ROOT); self.assertEqual(m['campaigns']['connection-debug']['levels'],['N00','N01','N02','N03','N04','N05','N06','N11']); self.assertEqual(m['campaigns']['connection-debug']['execution'],'sequential')
     def test_recommended_sequence(self):
         m=load_manifest(ROOT); self.assertEqual(m['sequences']['recommended-debug']['campaigns'],['source-audit','auth-debug','connection-debug','full-local'])
+    def test_world_switch_campaign(self):
+        m=load_manifest(ROOT); self.assertEqual(m['campaigns']['world-switch']['levels'],['N00','N01','N02','N03','N04','N05','N06','N07','N10','N11']); self.assertEqual(m['campaigns']['world-switch']['execution'],'sequential')

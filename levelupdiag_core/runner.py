@@ -10,10 +10,30 @@ from .verdicts import aggregate_verdicts,BLOCKED,CONFIG_ERROR,ERROR,INFRA_ERROR,
 
 _HARD_DEP={BLOCKED,CONFIG_ERROR,ERROR,INFRA_ERROR}
 
+# Next may regenerate this tracked declaration during `next build` without changing
+# application source. Treat it as a diagnostic tool side effect, not target drift.
+_DEFAULT_TRACKED_IGNORE_PATHS=("frontend/next-env.d.ts",)
+
+
+def _print_actionable_findings(result: LevelResult, *, evidence_chars: int = 900):
+    actionable = [f for f in result.findings if f.severity not in {PASS, "SKIP"}]
+    if not actionable:
+        return
+    for finding in actionable:
+        print(f"    {finding.severity} {finding.id}: {finding.message}", flush=True)
+        if finding.evidence:
+            evidence = str(finding.evidence).strip().replace("\r", "")
+            if len(evidence) > evidence_chars:
+                evidence = "…" + evidence[-evidence_chars:]
+            for line in evidence.splitlines()[-12:]:
+                print(f"      {line}", flush=True)
+        if finding.recommendation:
+            print(f"      → {finding.recommendation}", flush=True)
+
 def _now(): return datetime.now().astimezone().isoformat(timespec='seconds')
 def _run_id(): return datetime.now().astimezone().strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
 
-def _tracked_status(target:Path, ignored_roots=()):
+def _tracked_status(target:Path, ignored_roots=(), ignored_paths=()):
     if not (target/'.git').exists() or shutil.which('git') is None: return None
     try:
         cmd=['git','status','--porcelain=v1','--untracked-files=no']
@@ -30,11 +50,26 @@ def _tracked_status(target:Path, ignored_roots=()):
                     f':(top,exclude){rel_posix}',
                     f':(top,exclude){rel_posix}/**',
                 ])
+        for ignored in ignored_paths:
+            rel_posix=str(ignored).replace('\\','/').strip().strip('/')
+            if rel_posix and rel_posix != '.':
+                exclusions.extend([
+                    f':(top,exclude){rel_posix}',
+                    f':(top,exclude){rel_posix}/**',
+                ])
         if exclusions:
             cmd.extend(['--','.',*exclusions])
         cp=subprocess.run(cmd,cwd=str(target),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',errors='replace',timeout=15,shell=False,check=False)
         return cp.stdout if cp.returncode==0 else None
     except (OSError,subprocess.TimeoutExpired): return None
+
+def _tracked_ignore_paths(exec_cfg):
+    configured=exec_cfg.get('protect_tracked_ignore_paths',[]) if isinstance(exec_cfg,dict) else []
+    if isinstance(configured,str): configured=[configured]
+    if not isinstance(configured,(list,tuple)): configured=[]
+    values=[*_DEFAULT_TRACKED_IGNORE_PATHS,*[str(x) for x in configured if str(x).strip()]]
+    # Preserve order while de-duplicating for deterministic diagnostics.
+    return tuple(dict.fromkeys(values))
 
 def _cleanup_runtime(control:Path,purge_legacy=True):
     control.mkdir(parents=True,exist_ok=True)
@@ -60,7 +95,8 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
         levels=list(levels); mode='sequential'
     expected=[str(x) for x in levels]
     control=config.control_root_path; exec_cfg=config.get('execution',{}) if isinstance(config.get('execution',{}),dict) else {}
-    before_tracked=_tracked_status(config.target_root_path,(control,)) if exec_cfg.get('protect_tracked_files',True) else None
+    tracked_ignore_paths=_tracked_ignore_paths(exec_cfg)
+    before_tracked=_tracked_status(config.target_root_path,(control,),tracked_ignore_paths) if exec_cfg.get('protect_tracked_files',True) else None
     _cleanup_runtime(control,bool(exec_cfg.get('purge_legacy_evidence',True)))
     current=control/'current'; latest=control/'latest'; current.mkdir(parents=True,exist_ok=True); latest.mkdir(parents=True,exist_ok=True)
     run_id=_run_id(); started=_now(); results=[]; by_id={}
@@ -88,16 +124,31 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
                 now=_now(); result=LevelResult(spec.id,spec.name,INFRA_ERROR,[Finding('diagnostics.worker.timeout',INFRA_ERROR,f'Level exceeded its {spec.timeout_seconds}s timeout.','diagnostics')],started_at=now,ended_at=now)
                 write_level_result(output,result)
             print(f'[{index:02d}/{len(expected):02d}] {spec.id} {spec.name} — {result.verdict} ({time.monotonic()-started_level:.1f}s)',flush=True)
+            if result.verdict != PASS:
+                _print_actionable_findings(result)
         by_id[spec.id]=result; results.append(result)
         latest_file=latest/spec.id.lower()/'result.json'; latest_file.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(output,latest_file)
     verdict=aggregate_verdicts([r.verdict for r in results])
-    after_tracked=_tracked_status(config.target_root_path,(control,)) if before_tracked is not None else None
+    after_tracked=_tracked_status(config.target_root_path,(control,),tracked_ignore_paths) if before_tracked is not None else None
     protection=None
     if before_tracked is not None and after_tracked is not None and before_tracked != after_tracked:
-        protection={'verdict':'ERROR','message':'Tracked Git state changed during diagnostics.','before':before_tracked,'after':after_tracked}
+        protection={
+            'verdict':'ERROR',
+            'message':'Tracked Git state changed during diagnostics.',
+            'before':before_tracked,
+            'after':after_tracked,
+            'ignored_paths':list(tracked_ignore_paths),
+        }
         verdict=ERROR
+        print('TARGET PROTECTION — ERROR: tracked Git state changed during diagnostics.',flush=True)
+        if before_tracked.strip():
+            print('  before:',flush=True)
+            for line in before_tracked.strip().splitlines()[-12:]: print(f'    {line}',flush=True)
+        if after_tracked.strip():
+            print('  after:',flush=True)
+            for line in after_tracked.strip().splitlines()[-12:]: print(f'    {line}',flush=True)
     ended=_now(); summary=CampaignResult(campaign,verdict,results,run_id,started,ended,expected)
-    payload=summary.to_dict(); payload['target_repo_root']=str(config.target_root_path); payload['retention']='current_only'; payload['sequence']=expected; payload['target_protection']=protection
+    payload=summary.to_dict(); payload['target_repo_root']=str(config.target_root_path); payload['retention']='current_only'; payload['sequence']=expected; payload['target_protection']=protection; payload['target_protection_ignored_paths']=list(tracked_ignore_paths)
     write_json(current/'summary.json',payload); (current/'summary.txt').write_text(f'{campaign}: {verdict}\n'+' -> '.join(expected)+'\n'+"\n".join(f'{r.level} {r.verdict} {r.name}' for r in results)+'\n',encoding='utf-8')
     return summary
 

@@ -113,3 +113,81 @@ Les noms LevelUpDiag v3 sont désormais les seules entrées d'installation/confi
 ## Authentication diagnostic
 
 The `auth-debug` campaign now validates the Konnaxion common identity implementation. It does not require OIDC to be enabled: federation is optional by design. It requires the OIDC capability to be correctly declared while local django-allauth login remains available.
+
+## 3.2 — Konnaxion Worlds / World Switch validation
+
+LevelUpDiag is now World-aware without changing the N00..N11 taxonomy.
+
+Run the focused qualification campaign after applying the Konnaxion World Switch overlay:
+
+```powershell
+python levelupdiag.py run world-switch
+```
+
+Exact sequence:
+
+```text
+N00 -> N01 -> N02 -> N03 -> N04 -> N05 -> N06 -> N07 -> N10 -> N11
+```
+
+The campaign validates:
+
+- `/w/<world>/...` URL ownership and Next rewrite/carry-over safety net;
+- current sidebar ownership, including `/konsensus -> ethiKos` and `?sidebar=` preservation tests;
+- World-aware API scoping and global/control-plane exclusions;
+- stale World/Release response protection;
+- Django World middleware ordering and immutable `WorldRuntime` context;
+- transaction-local PostgreSQL `search_path`;
+- `X-Konnaxion-World*` response headers;
+- data-plane fail-closed defaults and the `WORLD_DATA_PLANE_NOT_READY` 503 sentinel;
+- release-pinned background task scope;
+- frontend World helper/suite tests and backend Worlds tests;
+- Alpha/Beta multi-World schema/release isolation in N10.
+
+Control-plane liveness/readiness are probed read-only during N05. By default LevelUpDiag does **not** create or promote a World. To add a concrete end-to-end runtime/header probe after you already have a promoted local test World, set this in `levelupdiag.config.local.json`:
+
+```json
+{
+  "konnaxion": {
+    "worlds": {
+      "runtime_probe_world_key": "demo-alpha"
+    }
+  }
+}
+```
+
+When a runtime World is configured, N05 also compares the returned World/Release payload to the `X-Konnaxion-World` and `X-Konnaxion-World-Release-Id` headers and checks that data-plane behavior matches the advertised capability state.
+
+For a focused qualification followed by the broad local regression suite:
+
+```powershell
+python levelupdiag.py run-sequence world-switch-validation
+```
+
+Windows shortcut: `RUN_KONNAXION_WORLD_SWITCH.bat` (or `launchers/KX-world-switch.bat`).
+
+## 3.2.1 — Focused Worlds qualification and immediate triage
+
+`world-switch` is now intentionally focused. It no longer reruns the generic platform smoke suite, full ESLint/Jest sweep, full Playwright smoke gate, full frontend deep scan, or full backend pytest suite. Those remain in `full-local`, which `world-switch-validation` runs only after the focused Worlds campaign passes.
+
+This removes duplicate long-running work and makes a failing Worlds campaign easier to interpret.
+
+After any run, print actionable findings from the retained current evidence with:
+
+```powershell
+python levelupdiag.py triage-current
+```
+
+Non-PASS findings are also printed immediately after each level in the console, with a concise evidence tail.
+
+
+## 3.2.2 — Accurate sequence verdicts and target-protection visibility
+
+Sequence aggregation already treats warning-only campaigns as `WARN`. v3.2.2 fixes the hidden post-run target-protection edge case that could still turn a warning-only sequence into `ERROR` after N11.
+
+- `frontend/next-env.d.ts` is ignored by tracked-file protection because Next can regenerate this declaration during `next build`; this is a known build-tool side effect, not application-source drift.
+- Any other tracked-file change during diagnostics remains a blocking `ERROR`.
+- `triage-current` now prints `TARGET_PROTECTION ERROR` with the before/after Git status when such drift occurs.
+- Additional safe generated paths can be configured through `execution.protect_tracked_ignore_paths` in a local config when needed.
+
+Therefore a sequence whose actual campaign results are only `PASS`/`WARN` now terminates as `WARN`, while real source mutation is still surfaced as `ERROR`.

@@ -1,0 +1,47 @@
+from __future__ import annotations
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from levelupdiag_core.runner import _tracked_ignore_paths, _tracked_status
+from levelupdiag_core.verdicts import PASS, WARN, aggregate_verdicts
+
+
+@unittest.skipUnless(shutil.which('git'), 'git is required for tracked-state protection tests')
+class TargetProtectionTests(unittest.TestCase):
+    def test_next_env_generation_is_ignored_but_source_drift_is_not(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            (root / 'frontend').mkdir()
+            (root / 'frontend' / 'next-env.d.ts').write_text('v1\n', encoding='utf-8')
+            (root / 'source.py').write_text('x = 1\n', encoding='utf-8')
+            subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+
+            ignored = _tracked_ignore_paths({})
+            before = _tracked_status(root, ignored_paths=ignored)
+            self.assertIsNotNone(before)
+
+            (root / 'frontend' / 'next-env.d.ts').write_text('v2\n', encoding='utf-8')
+            after_generated = _tracked_status(root, ignored_paths=ignored)
+            self.assertEqual(before, after_generated)
+
+            (root / 'source.py').write_text('x = 2\n', encoding='utf-8')
+            after_source = _tracked_status(root, ignored_paths=ignored)
+            self.assertNotEqual(before, after_source)
+
+
+    def test_warning_only_aggregate_stays_warn(self):
+        self.assertEqual(aggregate_verdicts([PASS, WARN, PASS]), WARN)
+
+    def test_config_can_add_safe_ignored_paths(self):
+        ignored = _tracked_ignore_paths({'protect_tracked_ignore_paths': ['frontend/generated.txt']})
+        self.assertIn('frontend/next-env.d.ts', ignored)
+        self.assertIn('frontend/generated.txt', ignored)
+        self.assertEqual(len(ignored), len(set(ignored)))
+
+
+if __name__ == '__main__':
+    unittest.main()
