@@ -191,3 +191,21 @@ Sequence aggregation already treats warning-only campaigns as `WARN`. v3.2.2 fix
 - Additional safe generated paths can be configured through `execution.protect_tracked_ignore_paths` in a local config when needed.
 
 Therefore a sequence whose actual campaign results are only `PASS`/`WARN` now terminates as `WARN`, while real source mutation is still surfaced as `ERROR`.
+
+
+## 3.3.0 — Bilingual UI / i18n qualification
+
+LevelUpDiag now treats the Konnaxion FR/EN runtime as a first-class diagnostic surface.
+
+Focused run:
+
+```powershell
+python levelupdiag.py run i18n-validation
+```
+
+N03 performs catalog alignment, placeholder parity, CSS/styled-jsx safety and stable-value checks before the normal i18n script, TypeScript, ESLint, Jest and Next build gates. N05 performs a real Chromium FR/EN switch and verifies `html[lang]`, translated accessibility text, localStorage, cookie persistence and reload persistence. See `docs/I18N_VALIDATION.md`.
+
+
+### v3.3.3 focused i18n isolation
+
+`i18n-validation` treats the worker `LEVELUPDIAG_CAMPAIGN` as authoritative. N05 only ensures the frontend runtime is available and executes the dedicated FR/EN browser-switch probe. It does not run the generic Ethikos Playwright smoke, Ethikos seed, backend readiness, or Worlds runtime probe. `doctor` prints the effective `suite_version`.

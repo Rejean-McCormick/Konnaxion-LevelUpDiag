@@ -11,6 +11,7 @@ The order below is part of the diagnostic contract. All Konnaxion campaigns use 
 | full-local | N00 → N01 → N02 → N03 → N04 → N05 → N06 → N07 → N10 → N11 |
 | backend | N00 → N01 → N02 → N04 → N06 → N11 |
 | frontend | N00 → N01 → N03 → N04 → N05 → N11 |
+| i18n-validation | N00 → N01 → N03 → N05 → N11 |
 | local-runtime | N00 → N02 → N03 → N04 → N05 → N06 → N11 |
 | capsule-local | N00 → N07 → N08 → N11 |
 | deployed | N00 → N07 → N08 → N09 → N11 |

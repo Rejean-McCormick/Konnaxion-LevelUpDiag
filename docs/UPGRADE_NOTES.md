@@ -37,3 +37,7 @@ N11 previously treated all N01..N10 as expected even for focused campaigns. N00 
 - N10 runs the Alpha/Beta multi-World isolation test explicitly.
 - N11 recognizes Worlds routing/isolation/release failures as a dedicated correlation hypothesis.
 - Existing campaigns remain ordered and compatible.
+
+## 3.3.1
+
+Target protection now snapshots/restores `frontend/storageState.json` across browser diagnostics, avoiding false target drift while preserving the exact pre-run state.

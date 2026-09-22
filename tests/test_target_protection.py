@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from levelupdiag_core.runner import _tracked_ignore_paths, _tracked_status
+from levelupdiag_core.runner import (
+    _restore_tracked_paths,
+    _snapshot_tracked_paths,
+    _tracked_ignore_paths,
+    _tracked_restore_paths,
+    _tracked_status,
+)
 from levelupdiag_core.verdicts import PASS, WARN, aggregate_verdicts
 
 
@@ -33,6 +39,37 @@ class TargetProtectionTests(unittest.TestCase):
             self.assertNotEqual(before, after_source)
 
 
+
+    def test_storage_state_is_restored_to_pre_diagnostic_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_file = root / 'frontend' / 'storageState.json'
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text('{"before": true}\n', encoding='utf-8')
+
+            paths = _tracked_restore_paths({})
+            self.assertIn('frontend/storageState.json', paths)
+            snapshot = _snapshot_tracked_paths(root, paths)
+
+            state_file.write_text('{"after": true}\n', encoding='utf-8')
+            restored = _restore_tracked_paths(root, snapshot)
+
+            self.assertIn('frontend/storageState.json', restored)
+            self.assertEqual(state_file.read_text(encoding='utf-8'), '{"before": true}\n')
+
+    def test_absent_storage_state_created_by_diagnostics_is_removed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_file = root / 'frontend' / 'storageState.json'
+            state_file.parent.mkdir(parents=True)
+            snapshot = _snapshot_tracked_paths(root, _tracked_restore_paths({}))
+
+            state_file.write_text('{"generated": true}\n', encoding='utf-8')
+            restored = _restore_tracked_paths(root, snapshot)
+
+            self.assertIn('frontend/storageState.json', restored)
+            self.assertFalse(state_file.exists())
+
     def test_warning_only_aggregate_stays_warn(self):
         self.assertEqual(aggregate_verdicts([PASS, WARN, PASS]), WARN)
 
@@ -45,3 +82,10 @@ class TargetProtectionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DependencyBlockingTests(unittest.TestCase):
+    def test_fail_is_hard_dependency(self):
+        from levelupdiag_core.runner import _HARD_DEP
+        from levelupdiag_core.verdicts import FAIL
+        self.assertIn(FAIL, _HARD_DEP)

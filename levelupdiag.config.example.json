@@ -173,7 +173,13 @@
         "pytest",
         "konnaxion/worlds/tests/test_multiworld_isolation.py",
         "-q"
-      ]
+      ],
+      "frontend_i18n_check": [
+        "pnpm",
+        "run",
+        "i18n:check"
+      ],
+      "i18n_browser_probe": []
     },
     "remote": {
       "enabled": false,
@@ -189,7 +195,10 @@
       "http_timeout_seconds": 5,
       "runtime_probe_world_key": "",
       "data_plane_probe_path": "ethikos/"
-    }
+    },
+    "i18n_browser_probe_path": "/ekoh/dashboard?sidebar=ekoh",
+    "i18n_browser_probe_timeout_seconds": 180,
+    "i18n_browser_probe_required": true
   },
   "execution": {
     "mode": "sequential",
@@ -201,7 +210,8 @@
     "protect_tracked_files": true,
     "command_heartbeat_seconds": 15,
     "allow_network": false,
-    "allow_target_mutation": false
+    "allow_target_mutation": false,
+    "protect_tracked_restore_paths": []
   },
   "redaction": {
     "enabled": true,

@@ -21,7 +21,7 @@ def main(argv=None):
             result=run_worker(root,args.level,Path(args.output),args.worker_target); return exit_code(result.verdict)
         cfg=load_config(root,args.target)
         if args.cmd=='doctor':
-            m=load_manifest(root); print('LevelUpDiag Konnaxion doctor: PASS'); print(f'tool_root: {root}'); print(f'target_root: {cfg.target_root_path}'); print(f'control_root: {cfg.control_root_path}'); print(f'levels: {len(m["levels"])}'); return 0
+            m=load_manifest(root); print('LevelUpDiag Konnaxion doctor: PASS'); print(f'suite_version: {m.get("suite_version", "unknown")}'); print(f'tool_root: {root}'); print(f'target_root: {cfg.target_root_path}'); print(f'control_root: {cfg.control_root_path}'); print(f'levels: {len(m["levels"])}'); return 0
         if args.cmd=='list':
             m=load_manifest(root)
             print('Campaigns:')

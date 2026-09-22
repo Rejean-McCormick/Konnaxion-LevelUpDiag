@@ -1,9 +1,9 @@
 {
   "schema": "levelupdiag.manifest.v2",
   "standard": "LevelUpDiag",
-  "standard_version": "2.1.0-konnaxion",
-  "suite_name": "Konnaxion LevelUpDiag \u2014 Upgraded",
-  "suite_version": "3.2.2",
+  "standard_version": "2.2.0-konnaxion",
+  "suite_name": "Konnaxion LevelUpDiag — Upgraded",
+  "suite_version": "3.3.3",
   "repository_mode": "copy-in-or-standalone-diagnostics-suite",
   "control_dir_default": ".levelupdiag",
   "retention_default": "current_only",
@@ -64,7 +64,7 @@
       ],
       "timeout_seconds": 2400,
       "parallel_safe": false,
-      "purpose": "Run TypeScript, ESLint, Jest and Next production-build diagnostics."
+      "purpose": "Validate i18n catalogs/safety, then run TypeScript, ESLint, Jest and Next production-build diagnostics."
     },
     {
       "id": "N04",
@@ -90,11 +90,12 @@
       "enabled": true,
       "required": true,
       "depends_on": [
-        "N00"
+        "N00",
+        "N03"
       ],
       "timeout_seconds": 1500,
       "parallel_safe": false,
-      "purpose": "Probe local HTTP surfaces and Playwright smoke flows."
+      "purpose": "Probe local HTTP surfaces, verify the FR/EN browser switch and run Playwright smoke flows."
     },
     {
       "id": "N06",
@@ -189,7 +190,7 @@
   ],
   "campaigns": {
     "source-audit": {
-      "description": "Static repository and frontend\u2194backend contract audit before runtime checks.",
+      "description": "Static repository and frontend↔backend contract audit before runtime checks.",
       "execution": "sequential",
       "levels": [
         "N00",
@@ -261,6 +262,17 @@
         "N01",
         "N03",
         "N04",
+        "N05",
+        "N11"
+      ]
+    },
+    "i18n-validation": {
+      "description": "Focused bilingual UI qualification: static repository gate, i18n-aware frontend checks, live FR/EN browser switch, then correlation.",
+      "execution": "sequential",
+      "levels": [
+        "N00",
+        "N01",
+        "N03",
         "N05",
         "N11"
       ]

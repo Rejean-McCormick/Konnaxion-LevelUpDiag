@@ -31,6 +31,7 @@ from .common import (
     target_paths,
 )
 from .http_probe import probe as http_probe
+from .i18n_audit import audit_i18n, browser_probe_command
 from .source_audit import audit as source_audit
 from .worlds_audit import audit_worlds, probe_worlds_control_plane, summarize_worlds_audit
 
@@ -59,8 +60,13 @@ def _sha256_file(path: Path) -> str:
 
 
 def _current_campaign(config: AppConfig) -> str:
+    # The worker environment is authoritative for the campaign currently being
+    # executed. active-session.json is only a fallback for out-of-band helpers.
+    env_campaign = os.environ.get("LEVELUPDIAG_CAMPAIGN", "").strip()
+    if env_campaign:
+        return env_campaign
     session = active_session(config)
-    return str(session.get("campaign", "")) if session else os.environ.get("LEVELUPDIAG_CAMPAIGN", "")
+    return str(session.get("campaign", "")) if session else ""
 
 
 def _worlds_required(config: AppConfig) -> bool:
@@ -70,6 +76,11 @@ def _worlds_required(config: AppConfig) -> bool:
 def _worlds_focused(config: AppConfig) -> bool:
     """True for the fast, Worlds-specific qualification campaign."""
     return _current_campaign(config) == "world-switch"
+
+
+def _i18n_focused(config: AppConfig) -> bool:
+    """True only for the focused bilingual UI qualification campaign."""
+    return _current_campaign(config) == "i18n-validation"
 
 
 def _worlds_report(config: AppConfig) -> dict[str, Any]:
@@ -308,20 +319,80 @@ def frontend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     outputs: list[str] = []
     assert frontend_dir is not None
 
+    i18n_report = audit_i18n(frontend_dir)
+    if i18n_report.get("detected"):
+        errors = i18n_report.get("catalog_errors", {})
+        findings.append(Finding(
+            "kx.i18n.catalog-json",
+            FAIL if errors else PASS,
+            "i18n catalog JSON is invalid or missing." if errors else "EN/FR i18n catalogs are valid JSON.",
+            "i18n",
+            evidence=str(errors) if errors else None,
+            recommendation="Repair frontend/i18n/locales/en.json and fr.json before running frontend diagnostics." if errors else None,
+        ))
+        missing_en = i18n_report.get("missing_in_en", [])
+        missing_fr = i18n_report.get("missing_in_fr", [])
+        aligned = not missing_en and not missing_fr and not errors
+        findings.append(Finding(
+            "kx.i18n.catalog-alignment",
+            PASS if aligned else FAIL,
+            f"EN/FR catalogs aligned: {i18n_report.get('en_leaf_count', 0)} EN / {i18n_report.get('fr_leaf_count', 0)} FR leaves." if aligned else "EN/FR catalogs do not expose the same leaf keys.",
+            "i18n",
+            evidence=str({"missing_in_en": missing_en[:40], "missing_in_fr": missing_fr[:40]}) if not aligned else None,
+            recommendation="Align en.json and fr.json to the exact same key tree." if not aligned else None,
+        ))
+        blanks = list(i18n_report.get("blank_en", [])) + list(i18n_report.get("blank_fr", []))
+        findings.append(Finding(
+            "kx.i18n.nonblank-values", PASS if not blanks else FAIL,
+            "i18n catalog leaves are non-empty." if not blanks else f"Empty/non-string i18n leaves detected: {len(blanks)}.",
+            "i18n", evidence="\n".join(blanks[:80]) if blanks else None,
+            recommendation="Every catalog leaf must be a non-empty display string." if blanks else None,
+        ))
+        placeholders = i18n_report.get("placeholder_mismatches", [])
+        findings.append(Finding(
+            "kx.i18n.placeholders", PASS if not placeholders else FAIL,
+            "EN/FR interpolation placeholders match." if not placeholders else f"Interpolation placeholder mismatches detected: {len(placeholders)}.",
+            "i18n", evidence=json.dumps(placeholders[:40], ensure_ascii=False) if placeholders else None,
+            recommendation="Keep the same {placeholder} names in both language values." if placeholders else None,
+        ))
+        css_values = i18n_report.get("css_like_catalog_values", [])
+        style_calls = i18n_report.get("style_translation_calls", [])
+        style_bad = bool(css_values or style_calls)
+        findings.append(Finding(
+            "kx.i18n.style-safety", PASS if not style_bad else FAIL,
+            "No CSS/styled-jsx content is routed through translations." if not style_bad else "CSS or styled-jsx content was captured by i18n.",
+            "i18n",
+            evidence=json.dumps({"catalog_keys": css_values[:40], "source_calls": style_calls[:40]}, ensure_ascii=False) if style_bad else None,
+            recommendation="Keep CSS static. Never replace <style jsx> content with t()/i18nT()." if style_bad else None,
+        ))
+        value_calls = i18n_report.get("translated_value_calls", [])
+        findings.append(Finding(
+            "kx.i18n.stable-values", PASS if not value_calls else FAIL,
+            "No translated strings are used as technical option/input values." if not value_calls else f"Translated technical values detected: {len(value_calls)}.",
+            "i18n", evidence=json.dumps(value_calls[:60], ensure_ascii=False) if value_calls else None,
+            recommendation="Translate only labels. Keep option/filter/form values stable language-independent identifiers." if value_calls else None,
+        ))
+
     if _worlds_focused(config):
         # Keep only compilation/build gates here. The dedicated Worlds Jest suite
         # is added below; generic lint/Jest belong to the subsequent full-local.
-        specs = [
+        specs = []
+        if i18n_report.get("detected"):
+            specs.append(("kx.frontend.i18n-check", "Frontend i18n catalog check", "frontend_i18n_check", ["pnpm", "run", "i18n:check"], False, 300))
+        specs.extend([
             ("kx.frontend.typecheck", "TypeScript typecheck", "frontend_typecheck", ["pnpm", "exec", "tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"], False, 600),
             ("kx.frontend.build", "Next production build", "frontend_build", ["pnpm", "exec", "next", "build"], False, 1200),
-        ]
+        ])
     else:
-        specs = [
+        specs = []
+        if i18n_report.get("detected"):
+            specs.append(("kx.frontend.i18n-check", "Frontend i18n catalog check", "frontend_i18n_check", ["pnpm", "run", "i18n:check"], False, 300))
+        specs.extend([
             ("kx.frontend.typecheck", "TypeScript typecheck", "frontend_typecheck", ["pnpm", "exec", "tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"], False, 600),
             ("kx.frontend.eslint", "Frontend ESLint", "frontend_lint", ["pnpm", "exec", "eslint", "."], False, 600),
             ("kx.frontend.jest", "Frontend Jest", "frontend_jest", ["pnpm", "exec", "jest", "--passWithNoTests", "--runInBand"], False, 900),
             ("kx.frontend.build", "Next production build", "frontend_build", ["pnpm", "exec", "next", "build"], False, 1200),
-        ]
+        ])
 
     eslint_report: dict[str, Any] = {}
     for fid, label, key, default, opt, timeout in specs:
@@ -392,6 +463,7 @@ def frontend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         **session_metadata(config),
         "cwd": str(frontend_dir),
         "worlds": worlds,
+        "i18n": i18n_report,
     }
     if eslint_report:
         metadata["eslint"] = eslint_report
@@ -579,6 +651,11 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
     frontend_dir = paths["frontend"] or config.target_root_path
     backend_dir = paths["backend"] or config.target_root_path
     urls = section.get("local_urls", ["http://127.0.0.1:3000", "http://127.0.0.1:8000/api/"])
+    if _i18n_focused(config):
+        # The bilingual probe only needs the frontend shell. Do not make an
+        # unrelated backend outage contaminate the focused i18n verdict.
+        frontend_urls = [str(url) for url in urls if ":3000" in str(url)]
+        urls = frontend_urls or ["http://127.0.0.1:3000"]
     findings: list[Finding] = []
     started_processes: list[subprocess.Popen[str] | None] = []
     worlds: dict[str, Any] = {}
@@ -631,7 +708,7 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                 ))
 
         worlds = _worlds_report(config)
-        if _worlds_enabled_for_check(config, worlds):
+        if _worlds_enabled_for_check(config, worlds) and not _i18n_focused(config):
             probe_report = probe_worlds_control_plane(config, paths)
             for item in probe_report.get("findings", []):
                 findings.append(Finding(
@@ -653,6 +730,14 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                 "Full Playwright smoke is deferred to full-local after the focused Worlds qualification.",
                 "runtime",
                 recommendation="Run world-switch-validation to execute full-local after Worlds gates pass.",
+            ))
+        elif _i18n_focused(config):
+            findings.append(Finding(
+                "kx.runtime.playwright-smoke",
+                SKIP,
+                "Generic Playwright smoke is excluded from the focused i18n-validation campaign.",
+                "runtime",
+                recommendation="Run frontend or full-local separately for the broader Playwright suite.",
             ))
         else:
             seed_cmd = command_value(config, "ethikos_seed_workflow") or [
@@ -692,12 +777,40 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                 ),
             )
             findings.append(finding)
+
+        i18n_report = audit_i18n(frontend_dir)
+        if i18n_report.get("detected") and not _worlds_focused(config):
+            frontend_url = next((str(url) for url in urls if ":3000" in str(url)), str(urls[0]) if urls else "http://127.0.0.1:3000")
+            probe_path = str(section.get("i18n_browser_probe_path", "/ekoh/dashboard?sidebar=ekoh"))
+            i18n_timeout = int(section.get("i18n_browser_probe_timeout_seconds", 180))
+            custom_i18n_cmd = command_value(config, "i18n_browser_probe")
+            i18n_cmd = custom_i18n_cmd or browser_probe_command(frontend_url, probe_path)
+            i18n_finding, i18n_step = command_probe(
+                config,
+                finding_id="kx.runtime.i18n-browser-switch",
+                label="FR/EN browser language switch",
+                command=i18n_cmd,
+                cwd=frontend_dir,
+                timeout=i18n_timeout,
+                optional=not bool(section.get("i18n_browser_probe_required", True)),
+                recommendation=(
+                    "Verify the LanguageToggle is rendered in the application shell, html[lang] switches between fr-CA/en-CA, "
+                    "and konnaxion.language persists in localStorage + cookie. Ensure Playwright Chromium is installed."
+                ),
+            )
+            findings.append(i18n_finding)
+            if i18n_step:
+                outputs_i18n = i18n_step.output_tail
+            else:
+                outputs_i18n = ""
+        else:
+            outputs_i18n = ""
         return make_result(
             level_id,
             level_name,
             started,
             findings,
-            output=step.output_tail if step else "",
+            output="\n\n".join(x for x in [step.output_tail if step else "", outputs_i18n] if x),
             metadata={
                 **session_metadata(config),
                 "autostarted_runtime": needs_runtime and autostart,
@@ -705,6 +818,8 @@ def runtime_smoke(config: AppConfig, level_id: str, level_name: str) -> LevelRes
                 "worlds": worlds,
                 "worlds_runtime_probe": probe_report,
                 "focused_worlds_campaign": _worlds_focused(config),
+                "focused_i18n_campaign": _i18n_focused(config),
+                "i18n": audit_i18n(frontend_dir),
             },
         )
     finally:

@@ -277,6 +277,7 @@ class LevelUpDiagConsole(tk.Tk):
             ("SOURCE AUDIT", "source-audit"),
             ("AUTH DEBUG", "auth-debug"),
             ("CONNECTION DEBUG", "connection-debug"),
+            ("I18N FR/EN", "i18n-validation"),
             ("FULL LOCAL", "full-local"),
         )
         shown = 0

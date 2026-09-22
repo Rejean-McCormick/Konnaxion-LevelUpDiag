@@ -13,7 +13,7 @@ foreach ($Dir in $Dirs) {
     if (Test-Path $Dest) { Move-Item -Force $Dest (Join-Path $Backup $Dir) }
     Copy-Item -Recurse -Force (Join-Path $PackRoot $Dir) $Dest
 }
-foreach ($File in @("levelupdiag.py","LEVELUPDIAG_CONSOLE.pyw","levelupdiag_manifest.json","levelupdiag.config.json","levelupdiag.config.example.json","README.md","RUN_KONNAXION_LEVELUPDIAG.bat","RUN_KONNAXION_LEVELUPDIAG.sh",".gitignore",".smartignore")) {
+foreach ($File in @("levelupdiag.py","LEVELUPDIAG_CONSOLE.pyw","levelupdiag_manifest.json","levelupdiag.config.json","levelupdiag.config.example.json","README.md","RUN_KONNAXION_LEVELUPDIAG.bat","RUN_KONNAXION_I18N_VALIDATION.bat","RUN_KONNAXION_LEVELUPDIAG.sh",".gitignore",".smartignore")) {
     $Src=Join-Path $PackRoot $File; $Dst=Join-Path $Target $File
     if (Test-Path $Dst) { Copy-Item -Force $Dst (Join-Path $Backup $File) }
     Copy-Item -Force $Src $Dst
@@ -28,8 +28,8 @@ foreach ($Obsolete in @("INSTALL_AND_CONFIGURE_KONNAXION_MEGAPACK.pyw","CONFIGUR
 }
 if (Test-Path (Join-Path $Backup "levelupdiag.config.local.json")) { Copy-Item -Force (Join-Path $Backup "levelupdiag.config.local.json") $Preserve }
 Get-ChildItem -Path $Target -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "Upgraded Konnaxion LevelUpDiag v3: $Target"
+Write-Host "Upgraded Konnaxion LevelUpDiag v3.3: $Target"
 Write-Host "Backup: $Backup"
 Write-Host "Existing local config preserved. Old runtime logs are not migrated; next campaign uses current-only evidence."
 Write-Host "Run: python levelupdiag.py doctor"
-Write-Host "Then: python levelupdiag.py run connection-debug"
+Write-Host "Then: python levelupdiag.py run i18n-validation`nOr: python levelupdiag.py run connection-debug"

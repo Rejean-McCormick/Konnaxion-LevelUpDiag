@@ -13,7 +13,7 @@ from konnaxion_diag.checks import run_domain
 
 LEVEL_ID = "N05"
 LEVEL_NAME = "Runtime & Browser"
-PURPOSE = "Probe local HTTP surfaces and Playwright smoke flows."
+PURPOSE = "Probe local HTTP surfaces, verify the FR/EN browser switch and run Playwright smoke flows."
 
 def run(config: AppConfig | None = None):
     cfg = load_config() if config is None else config

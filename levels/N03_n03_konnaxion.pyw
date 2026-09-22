@@ -13,7 +13,7 @@ from konnaxion_diag.checks import run_domain
 
 LEVEL_ID = "N03"
 LEVEL_NAME = "Frontend / Next"
-PURPOSE = "Run TypeScript, ESLint, Jest and Next production-build diagnostics."
+PURPOSE = "Validate i18n catalogs/safety, then run TypeScript, ESLint, Jest and Next production-build diagnostics."
 
 def run(config: AppConfig | None = None):
     cfg = load_config() if config is None else config
