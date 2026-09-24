@@ -8,6 +8,7 @@ from pathlib import Path
 from levelupdiag_core.runner import (
     _restore_tracked_paths,
     _snapshot_tracked_paths,
+    _tracked_compare_ignore_paths,
     _tracked_ignore_paths,
     _tracked_restore_paths,
     _tracked_status,
@@ -69,6 +70,13 @@ class TargetProtectionTests(unittest.TestCase):
 
             self.assertIn('frontend/storageState.json', restored)
             self.assertFalse(state_file.exists())
+
+
+    def test_restore_paths_are_excluded_from_git_drift_comparison(self):
+        ignored = _tracked_compare_ignore_paths({})
+        self.assertIn('frontend/next-env.d.ts', ignored)
+        self.assertIn('frontend/storageState.json', ignored)
+        self.assertEqual(len(ignored), len(set(ignored)))
 
     def test_warning_only_aggregate_stays_warn(self):
         self.assertEqual(aggregate_verdicts([PASS, WARN, PASS]), WARN)

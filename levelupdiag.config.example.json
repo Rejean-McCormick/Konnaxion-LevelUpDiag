@@ -198,7 +198,8 @@
     },
     "i18n_browser_probe_path": "/ekoh/dashboard?sidebar=ekoh",
     "i18n_browser_probe_timeout_seconds": 180,
-    "i18n_browser_probe_required": true
+    "i18n_browser_probe_required": true,
+    "test_db_admin_host": ""
   },
   "execution": {
     "mode": "sequential",

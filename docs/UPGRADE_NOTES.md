@@ -41,3 +41,19 @@ N11 previously treated all N01..N10 as expected even for focused campaigns. N00 
 ## 3.3.1
 
 Target protection now snapshots/restores `frontend/storageState.json` across browser diagnostics, avoiding false target drift while preserving the exact pre-run state.
+
+## 2026-09-24 — isolated Django pytest databases
+
+Konnaxion backend pytest probes now run through `scripts/run_isolated_django_pytest.py`.
+Each LevelUpDiag run/probe receives its own PostgreSQL test database name, target-project
+`--reuse-db` addopts are overridden, and the database is terminated/dropped in a `finally`
+cleanup path. This prevents N02/N06/N10 from contaminating each other through a shared
+`test_neondb` on Neon/PgBouncer.
+
+If an environment requires an unpooled administrative endpoint for create/drop cleanup,
+set `konnaxion.test_db_admin_host` in `levelupdiag.config.local.json`. The default is empty,
+which reuses the target application's configured PostgreSQL host.
+
+## 2026-09-24 — isolated pytest project-root fix
+
+The isolated Django pytest wrapper now receives the Konnaxion backend as an explicit `--project-root`, prepends it to `sys.path`/`PYTHONPATH`, and changes into that directory before importing `config.settings.test`. This fixes `ModuleNotFoundError: No module named 'config'` when the wrapper itself lives under `LevelUpDiag/scripts`.

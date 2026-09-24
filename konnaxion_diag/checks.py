@@ -96,6 +96,195 @@ def _worlds_enabled_for_check(config: AppConfig, report: dict[str, Any] | None =
     return bool(current.get("detected")) or _worlds_required(config)
 
 
+_STALE_TEST_DB_MARKERS = (
+    'does not exist',
+    'undefinedtable',
+    'no such table',
+)
+
+
+def _pytest_schema_is_stale(step) -> bool:
+    if step is None or step.verdict == PASS:
+        return False
+    text = f"{step.output_tail}\n{step.error}".lower()
+    missing_relation = ('relation "' in text or "relation '" in text or 'no such table' in text)
+    return missing_relation and any(marker in text for marker in _STALE_TEST_DB_MARKERS)
+
+
+def _pytest_clean_db_command(command):
+    """Legacy fallback: force recreation when an isolated wrapper cannot be used."""
+    if not command:
+        return None
+    args = [str(x) for x in command]
+    if not any('pytest' in part.lower() for part in args):
+        return None
+    args = [arg for arg in args if arg != '--reuse-db']
+    if '--create-db' not in args:
+        args.append('--create-db')
+    return args
+
+
+def _pytest_args(command) -> list[str] | None:
+    """Extract pytest arguments from the supported command shapes."""
+    if not command:
+        return None
+    args = [str(x) for x in command]
+    lowered = [Path(x).name.lower() for x in args]
+
+    for index in range(len(args) - 1):
+        if lowered[index] in {'python', 'python.exe', 'python3', 'python3.exe'} and args[index + 1] == '-m':
+            if index + 2 < len(args) and args[index + 2].lower() == 'pytest':
+                return args[index + 3:]
+
+    for index, value in enumerate(lowered):
+        if value in {'pytest', 'pytest.exe'}:
+            return args[index + 1:]
+    return None
+
+
+def _pytest_isolated_db_name(finding_id: str) -> str:
+    """Return a deterministic-per-run/per-probe PostgreSQL-safe test DB name."""
+    run_id = os.environ.get('LEVELUPDIAG_RUN_ID', '').strip() or f'pid-{os.getpid()}'
+    digest = hashlib.sha256(f'{run_id}:{finding_id}'.encode('utf-8')).hexdigest()[:16]
+    return f'test_kx_lud_{digest}'
+
+
+def _pytest_isolated_command(config: AppConfig, command, *, finding_id: str, project_root: Path) -> tuple[list[str], str] | None:
+    pytest_args = _pytest_args(command)
+    if pytest_args is None:
+        return None
+    wrapper = config.diagnostics_root_path / 'scripts' / 'run_isolated_django_pytest.py'
+    if not wrapper.is_file():
+        return None
+
+    db_name = _pytest_isolated_db_name(finding_id)
+    result = [
+        'python',
+        str(wrapper),
+        '--db-name',
+        db_name,
+        '--settings',
+        'config.settings.test',
+        '--project-root',
+        str(project_root),
+    ]
+    section = kx_config(config)
+    admin_host = str(section.get('test_db_admin_host', '') or '').strip()
+    if admin_host:
+        result.extend(['--admin-host', admin_host])
+    pytest_args = [arg for arg in pytest_args if arg not in {'--reuse-db', '--create-db'}]
+    result.extend(['--', *pytest_args])
+    return result, db_name
+
+
+def _pytest_probe_with_clean_db_retry(
+    config: AppConfig,
+    *,
+    finding_id: str,
+    label: str,
+    command,
+    cwd: Path,
+    timeout: int,
+    optional: bool,
+    recommendation: str | None = None,
+):
+    """Run Django pytest probes in LevelUpDiag-owned ephemeral databases.
+
+    The function name is retained for compatibility with older LevelUpDiag
+    tests/plugins. Modern behavior avoids the target project's --reuse-db
+    entirely, assigns a unique DB to each campaign probe, and delegates
+    pre/post cleanup to the isolated pytest wrapper.
+    """
+    isolated = _pytest_isolated_command(config, command, finding_id=finding_id, project_root=cwd)
+    if isolated is not None:
+        isolated_command, db_name = isolated
+        finding, step = command_probe(
+            config,
+            finding_id=finding_id,
+            label=label,
+            command=isolated_command,
+            cwd=cwd,
+            timeout=timeout,
+            optional=optional,
+            recommendation=recommendation,
+        )
+        if finding.data is None:
+            finding.data = {}
+        finding.data.update({
+            'isolated_test_database': True,
+            'test_database_name': db_name,
+            'target_reuse_db_disabled': True,
+        })
+        if step is not None and 'LEVELUPDIAG_DB_CLEANUP_FAILED:' in (step.output_tail or ''):
+            finding.recommendation = (
+                'The isolated pytest database could not be removed. Configure '
+                'konnaxion.test_db_admin_host with a direct PostgreSQL/Neon host '
+                'if the pooled endpoint retains sessions.'
+            )
+        return finding, step
+
+    # Compatibility fallback for custom pytest launchers that cannot be
+    # decomposed into python -m pytest / pytest arguments.
+    finding, step = command_probe(
+        config,
+        finding_id=finding_id,
+        label=label,
+        command=command,
+        cwd=cwd,
+        timeout=timeout,
+        optional=optional,
+        recommendation=recommendation,
+    )
+    if not _pytest_schema_is_stale(step):
+        return finding, step
+
+    retry_command = _pytest_clean_db_command(command)
+    if not retry_command:
+        return finding, step
+
+    retry_finding, retry_step = command_probe(
+        config,
+        finding_id=finding_id,
+        label=f"{label} (clean test DB retry)",
+        command=retry_command,
+        cwd=cwd,
+        timeout=timeout,
+        optional=optional,
+        recommendation=recommendation,
+    )
+    if retry_step is not None and retry_step.verdict == PASS:
+        return Finding(
+            finding_id,
+            PASS,
+            f"{label} passed after recreating the stale pytest database.",
+            "command",
+            path=str(cwd),
+            evidence="Initial pytest run reported a missing relation/table; automatic --create-db retry passed.",
+            data={
+                "recovered_from_stale_test_db": True,
+                "retry_command": list(retry_step.command),
+                "retry_duration_seconds": retry_step.duration_seconds,
+            },
+        ), retry_step
+
+    if retry_finding.data is None:
+        retry_finding.data = {}
+    retry_finding.data["clean_test_db_retry"] = True
+    retry_finding.recommendation = (
+        recommendation
+        or "The clean pytest database retry also failed. Inspect migrations and the retry output before changing application code."
+    )
+    return retry_finding, retry_step
+
+
+def _powershell_supports_deep_only(script: Path) -> bool:
+    try:
+        text = script.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "[switch]$DeepOnly" in text or "[switch] $DeepOnly" in text
+
+
 def discovery(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     started = now()
     session_id = start_session(config)
@@ -174,7 +363,8 @@ def backend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         specs.append(("kx.backend.smoke", "Backend platform smoke tests", "backend_smoke", ["python", "-m", "pytest", "tests/test_smoke_platform.py", "-q"], False, 600))
     for fid,label,key,default,opt,timeout in specs:
         cmd = command_value(config, key) or default
-        finding, step = command_probe(config, finding_id=fid, label=label, command=cmd, cwd=backend_dir, timeout=timeout, optional=opt)
+        probe = _pytest_probe_with_clean_db_retry if any('pytest' in str(x).lower() for x in (cmd or [])) else command_probe
+        finding, step = probe(config, finding_id=fid, label=label, command=cmd, cwd=backend_dir, timeout=timeout, optional=opt)
         findings.append(finding)
         if step: outputs.append(f"## {label}\n{step.output_tail}")
 
@@ -183,7 +373,7 @@ def backend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         cmd = command_value(config, "backend_worlds_tests") or [
             "python", "-m", "pytest", "konnaxion/worlds/tests", "-q"
         ]
-        finding, step = command_probe(
+        finding, step = _pytest_probe_with_clean_db_retry(
             config,
             finding_id="kx.worlds.backend-tests",
             label="Konnaxion Worlds backend tests",
@@ -488,7 +678,8 @@ def contracts(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     for fid,label,key,default,cwd,opt,timeout in specs:
         assert cwd is not None
         cmd = command_value(config,key) or default
-        finding, step = command_probe(config, finding_id=fid, label=label, command=cmd, cwd=cwd, timeout=timeout, optional=opt)
+        probe = _pytest_probe_with_clean_db_retry if any('pytest' in str(x).lower() for x in (cmd or [])) else command_probe
+        finding, step = probe(config, finding_id=fid, label=label, command=cmd, cwd=cwd, timeout=timeout, optional=opt)
         findings.append(finding)
         if step: outputs.append(f"## {label}\n{step.output_tail}")
     audit = source_audit(paths["frontend"], paths["backend"])
@@ -834,7 +1025,8 @@ def jobs(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     ]
     for fid,label,key,default,opt,timeout in specs:
         cmd=command_value(config,key) or default
-        finding,step=command_probe(config,finding_id=fid,label=label,command=cmd,cwd=backend_dir,timeout=timeout,optional=opt,recommendation="Configure konnaxion.commands.jobs_probe for live Redis/Celery verification." if key=="jobs_probe" else None)
+        probe = _pytest_probe_with_clean_db_retry if any('pytest' in str(x).lower() for x in (cmd or [])) else command_probe
+        finding,step=probe(config,finding_id=fid,label=label,command=cmd,cwd=backend_dir,timeout=timeout,optional=opt,recommendation="Configure konnaxion.commands.jobs_probe for live Redis/Celery verification." if key=="jobs_probe" else None)
         findings.append(finding)
         if step: outputs.append(step.output_tail)
     worlds = _worlds_report(config)
@@ -858,7 +1050,7 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     if step: outputs.append(step.output_tail)
 
     cmd=command_value(config,"backend_auth_policy") or ["python","-m","pytest","konnaxion/users/tests/test_auth_policy.py","-q"]
-    finding,step=command_probe(
+    finding,step=_pytest_probe_with_clean_db_retry(
         config,
         finding_id="kx.security.auth-policy-tests",
         label="Konnaxion common-auth policy tests",
@@ -1048,11 +1240,13 @@ def deep_scan(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
             if script.is_file():
                 shell="pwsh" if _find_tool("pwsh") else "powershell"
                 cmd=[shell,"-NoProfile","-ExecutionPolicy","Bypass","-File",str(script)]
+                if _powershell_supports_deep_only(script):
+                    cmd.append("-DeepOnly")
         finding,step=command_probe(config,finding_id="kx.deep.frontend-full-scan",label="Konnaxion full frontend diagnostic scan",command=cmd,cwd=frontend,timeout=2400,optional=True,recommendation="Keep frontend/tools/full-scan.ps1 or configure konnaxion.commands.frontend_full_scan.")
         findings.append(finding)
         if step: outputs.append(step.output_tail)
         cmd=command_value(config,"backend_full_tests") or ["python","-m","pytest","-q"]
-        finding,step=command_probe(config,finding_id="kx.deep.backend-tests",label="Full backend pytest suite",command=cmd,cwd=backend_dir,timeout=2400,optional=True)
+        finding,step=_pytest_probe_with_clean_db_retry(config,finding_id="kx.deep.backend-tests",label="Full backend pytest suite",command=cmd,cwd=backend_dir,timeout=2400,optional=True)
         findings.append(finding)
         if step: outputs.append(step.output_tail)
     else:
@@ -1068,7 +1262,7 @@ def deep_scan(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         cmd = command_value(config, "backend_worlds_isolation_tests") or [
             "python", "-m", "pytest", "konnaxion/worlds/tests/test_multiworld_isolation.py", "-q"
         ]
-        finding, step = command_probe(
+        finding, step = _pytest_probe_with_clean_db_retry(
             config,
             finding_id="kx.worlds.deep-isolation",
             label="Multi-World isolation test",

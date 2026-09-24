@@ -81,6 +81,11 @@ def _tracked_restore_paths(exec_cfg):
     values=[*_DEFAULT_TRACKED_RESTORE_PATHS,*[str(x) for x in configured if str(x).strip()]]
     return tuple(dict.fromkeys(values))
 
+
+def _tracked_compare_ignore_paths(exec_cfg):
+    """Paths intentionally generated/restored by diagnostics are not target drift."""
+    return tuple(dict.fromkeys([*_tracked_ignore_paths(exec_cfg), *_tracked_restore_paths(exec_cfg)]))
+
 def _snapshot_tracked_paths(target:Path, paths):
     state={}
     target=target.resolve(strict=False)
@@ -147,9 +152,10 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
     control=config.control_root_path; exec_cfg=config.get('execution',{}) if isinstance(config.get('execution',{}),dict) else {}
     tracked_ignore_paths=_tracked_ignore_paths(exec_cfg)
     tracked_restore_paths=_tracked_restore_paths(exec_cfg)
+    tracked_compare_ignore_paths=_tracked_compare_ignore_paths(exec_cfg)
     protect_tracked=bool(exec_cfg.get('protect_tracked_files',True))
     tracked_restore_state=_snapshot_tracked_paths(config.target_root_path,tracked_restore_paths) if protect_tracked else {}
-    before_tracked=_tracked_status(config.target_root_path,(control,),tracked_ignore_paths) if protect_tracked else None
+    before_tracked=_tracked_status(config.target_root_path,(control,),tracked_compare_ignore_paths) if protect_tracked else None
     _cleanup_runtime(control,bool(exec_cfg.get('purge_legacy_evidence',True)))
     current=control/'current'; latest=control/'latest'; current.mkdir(parents=True,exist_ok=True); latest.mkdir(parents=True,exist_ok=True)
     run_id=_run_id(); started=_now(); results=[]; by_id={}
@@ -185,7 +191,7 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
     restored_tracked_paths=_restore_tracked_paths(config.target_root_path,tracked_restore_state) if tracked_restore_state else []
     if restored_tracked_paths:
         print('TARGET PROTECTION — restored diagnostic artifact(s): '+', '.join(restored_tracked_paths),flush=True)
-    after_tracked=_tracked_status(config.target_root_path,(control,),tracked_ignore_paths) if before_tracked is not None else None
+    after_tracked=_tracked_status(config.target_root_path,(control,),tracked_compare_ignore_paths) if before_tracked is not None else None
     protection=None
     if before_tracked is not None and after_tracked is not None and before_tracked != after_tracked:
         protection={
@@ -193,7 +199,7 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
             'message':'Tracked Git state changed during diagnostics.',
             'before':before_tracked,
             'after':after_tracked,
-            'ignored_paths':list(tracked_ignore_paths),
+            'ignored_paths':list(tracked_compare_ignore_paths),
         }
         verdict=ERROR
         print('TARGET PROTECTION — ERROR: tracked Git state changed during diagnostics.',flush=True)

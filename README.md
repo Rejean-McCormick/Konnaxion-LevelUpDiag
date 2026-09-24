@@ -130,6 +130,22 @@ Exact sequence:
 N00 -> N01 -> N02 -> N03 -> N04 -> N05 -> N06 -> N07 -> N10 -> N11
 ```
 
+### Isolated backend pytest databases
+
+LevelUpDiag does not inherit Konnaxion's project-level `--reuse-db` setting for Django pytest probes. N02, N04 OpenAPI tests, N06 Celery tests, N07 Konnaxion auth tests, and N10 run with a LevelUpDiag-owned ephemeral PostgreSQL database name that is unique per campaign run and probe. The wrapper terminates remaining sessions and drops that database in a `finally` cleanup path.
+
+For Neon installations where database create/drop administration must use an unpooled endpoint, set the optional override in `levelupdiag.config.local.json`:
+
+```json
+{
+  "konnaxion": {
+    "test_db_admin_host": "your-direct-postgresql-host"
+  }
+}
+```
+
+Leave it unset/empty to reuse the application's configured database host.
+
 The campaign validates:
 
 - `/w/<world>/...` URL ownership and Next rewrite/carry-over safety net;
