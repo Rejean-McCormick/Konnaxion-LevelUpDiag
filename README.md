@@ -218,3 +218,18 @@ For full qualification plus product regression:
 python levelupdiag.py run-sequence world-switch-validation
 ```
 
+
+
+## KX-UNIVERSES-1 quick post-overlay check
+
+After an overlay and zombie cleanup, run:
+
+```powershell
+python levelupdiag.py run universe-quick
+```
+
+Or double-click `RUN_KONNAXION_UNIVERSE_QUICK.bat`.
+
+This runs only `N00 -> N01 -> N11`: repository ownership/boundary checks without Django DB, OpenAPI pytest, frontend build, Playwright or deep scans.
+
+For deeper source/API qualification, `source-audit` remains available. Its isolated Django pytest wrapper now composes the sibling `Konnaxion_Worlds/backend` source root, preserving the KX-UNIVERSES-1 split without vendoring the engine back into Konnaxion.

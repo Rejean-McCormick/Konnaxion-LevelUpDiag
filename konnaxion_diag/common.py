@@ -129,6 +129,37 @@ def resolve_command(command: Sequence[str], *, cwd: Path | None = None) -> list[
     return args
 
 
+def _command_env(config: AppConfig, cwd: Path) -> dict[str, str]:
+    """Return the command environment with KX-UNIVERSES-1 source composition.
+
+    The host Konnaxion repo deliberately does not vendor ``konnaxion.worlds``.
+    When a diagnostic command executes from the host backend, expose the
+    sibling Konnaxion_Worlds/backend source root through PYTHONPATH.  Commands
+    executed inside the engine repo itself are left unchanged.
+    """
+    env = config.env()
+    paths = target_paths(config)
+    host_backend = paths.get("backend")
+    worlds_backend = paths.get("worlds_backend")
+    if not host_backend or not worlds_backend or not worlds_backend.is_dir():
+        return env
+    try:
+        is_host_backend = cwd.resolve(strict=False) == host_backend.resolve(strict=False)
+    except OSError:
+        is_host_backend = False
+    if not is_host_backend:
+        return env
+
+    extra = str(worlds_backend.resolve(strict=False))
+    current = str(env.get("PYTHONPATH", "") or "")
+    parts = [part for part in current.split(os.pathsep) if part]
+    normalized = {os.path.normcase(os.path.normpath(part)) for part in parts}
+    if os.path.normcase(os.path.normpath(extra)) not in normalized:
+        parts.insert(0, extra)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return env
+
+
 def command_probe(
     config: AppConfig,
     *,
@@ -166,7 +197,7 @@ def command_probe(
             None,
         )
     args = resolve_command(command, cwd=cwd)
-    step = run_cmd(args, cwd=cwd, timeout=timeout, name=label, env=config.env(), tail_chars=12000)
+    step = run_cmd(args, cwd=cwd, timeout=timeout, name=label, env=_command_env(config, cwd), tail_chars=12000)
     evidence = redact(step.output_tail)
     if step.verdict == PASS:
         severity = PASS

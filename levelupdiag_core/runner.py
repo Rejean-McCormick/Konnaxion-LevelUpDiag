@@ -63,7 +63,12 @@ def _tracked_status(target:Path, ignored_roots=(), ignored_paths=()):
         if exclusions:
             cmd.extend(['--','.',*exclusions])
         cp=subprocess.run(cmd,cwd=str(target),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',errors='replace',timeout=15,shell=False,check=False)
-        return cp.stdout if cp.returncode==0 else None
+        if cp.returncode != 0:
+            return None
+        # Porcelain status is semantically a set for target-protection purposes.
+        # Canonicalize it to avoid false drift caused only by output ordering.
+        lines=sorted(line.rstrip() for line in cp.stdout.splitlines() if line.strip())
+        return ('\n'.join(lines)+'\n') if lines else ''
     except (OSError,subprocess.TimeoutExpired): return None
 
 def _tracked_ignore_paths(exec_cfg):
@@ -203,12 +208,16 @@ def run_campaign(campaign,levels=None,config:AppConfig|None=None):
         }
         verdict=ERROR
         print('TARGET PROTECTION — ERROR: tracked Git state changed during diagnostics.',flush=True)
-        if before_tracked.strip():
-            print('  before:',flush=True)
-            for line in before_tracked.strip().splitlines()[-12:]: print(f'    {line}',flush=True)
-        if after_tracked.strip():
-            print('  after:',flush=True)
-            for line in after_tracked.strip().splitlines()[-12:]: print(f'    {line}',flush=True)
+        before_lines=set(before_tracked.splitlines())
+        after_lines=set(after_tracked.splitlines())
+        removed=sorted(before_lines-after_lines)
+        added=sorted(after_lines-before_lines)
+        if removed:
+            print('  disappeared during diagnostics:',flush=True)
+            for line in removed[:20]: print(f'    - {line}',flush=True)
+        if added:
+            print('  appeared/changed during diagnostics:',flush=True)
+            for line in added[:20]: print(f'    + {line}',flush=True)
     ended=_now(); summary=CampaignResult(campaign,verdict,results,run_id,started,ended,expected)
     payload=summary.to_dict(); payload['target_repo_root']=str(config.target_root_path); payload['retention']='current_only'; payload['sequence']=expected; payload['target_protection']=protection; payload['target_protection_ignored_paths']=list(tracked_ignore_paths); payload['target_protection_restored_paths']=restored_tracked_paths
     write_json(current/'summary.json',payload); (current/'summary.txt').write_text(f'{campaign}: {verdict}\n'+' -> '.join(expected)+'\n'+"\n".join(f'{r.level} {r.verdict} {r.name}' for r in results)+'\n',encoding='utf-8')

@@ -69,3 +69,9 @@ The isolated Django pytest wrapper now receives the Konnaxion backend as an expl
 - N05 probes the Universe catalog read-only and optionally validates a canonical Universe/World runtime route.
 - Default architecture lock changed from `KX-WORLDS-1` to `KX-UNIVERSES-1`.
 
+## 2026-09-28 — KX-UNIVERSES-1 backend composition hardening
+
+- Host-backend command probes now prepend `Konnaxion_Worlds/backend` to `PYTHONPATH`, so direct `manage.py check`, migration checks and other Django commands resolve the separately-owned `konnaxion.worlds` package without vendoring it back into Konnaxion.
+- Isolated pytest DB administrative cleanup now defaults to a 5-second PostgreSQL connection timeout when the project does not provide a stricter value, avoiding multi-minute hangs when the database is unavailable.
+- `universe-quick` remains the fast post-overlay boundary campaign; `backend` remains the decisive backend qualification campaign.
+

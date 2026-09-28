@@ -159,7 +159,7 @@ class WorldsAuditTests(unittest.TestCase):
             "KONNAXION_WORLDS_ENFORCE_SCOPED_API=True WORLD_REQUIRED\n", encoding="utf-8"
         )
         (worlds_repo / "scripts/check_repo_boundaries.py").write_text(
-            "Konnaxion_Worlds repository boundary frontend/components/worlds/WorldSwitcher.tsx\n",
+            "Konnaxion_Worlds repository boundary ENGINE_ALLOWED_CHILDREN ROOT / \"frontend\" backend/konnaxion contains only worlds\n",
             encoding="utf-8",
         )
         (worlds_repo / "docs/Technical-Reference/Worlds/20_UNIVERSES.md").write_text(

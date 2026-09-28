@@ -68,6 +68,7 @@ class FullLocalHardeningTests(unittest.TestCase):
     def test_isolated_command_uses_wrapper_and_drops_reuse_db_flag(self):
         class FakeConfig:
             diagnostics_root_path = Path(__file__).resolve().parents[1]
+            control_root_path = diagnostics_root_path / '.levelupdiag-test-control'
             def get(self, key, default=None):
                 return {} if key == 'konnaxion' else default
 
@@ -86,10 +87,15 @@ class FullLocalHardeningTests(unittest.TestCase):
         self.assertNotIn('--reuse-db', command)
         self.assertIn('--project-root', command)
         self.assertIn(str(Path('C:/fake/konnaxion/backend')), command)
+        self.assertIn('--basetemp', command)
+        basetemp_index = command.index('--basetemp') + 1
+        self.assertIn('.levelupdiag-test-control', command[basetemp_index])
+        self.assertIn(db_name, command[basetemp_index])
 
     def test_isolated_probe_runs_once_and_records_database_metadata(self):
         class FakeConfig:
             diagnostics_root_path = Path(__file__).resolve().parents[1]
+            control_root_path = diagnostics_root_path / '.levelupdiag-test-control'
             def get(self, key, default=None):
                 return {} if key == 'konnaxion' else default
 
@@ -111,6 +117,7 @@ class FullLocalHardeningTests(unittest.TestCase):
         self.assertEqual(probe.call_count, 1)
         self.assertTrue(finding.data['isolated_test_database'])
         self.assertTrue(finding.data['target_reuse_db_disabled'])
+        self.assertTrue(finding.data['isolated_pytest_basetemp'])
         self.assertTrue(finding.data['test_database_name'].startswith('test_kx_lud_'))
         self.assertIs(step, passed_step)
 

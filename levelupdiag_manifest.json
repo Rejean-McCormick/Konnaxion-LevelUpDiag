@@ -199,6 +199,15 @@
         "N11"
       ]
     },
+    "universe-quick": {
+      "description": "Fast KX-UNIVERSES-1 post-overlay boundary check: discovery, repository/static ownership audit, then correlation. No Django DB, OpenAPI, frontend build or Playwright.",
+      "execution": "sequential",
+      "levels": [
+        "N00",
+        "N01",
+        "N11"
+      ]
+    },
     "auth-debug": {
       "description": "Focused Konnaxion auth path: backend, frontend, API/auth contracts, browser smoke and common-auth security policy.",
       "execution": "sequential",

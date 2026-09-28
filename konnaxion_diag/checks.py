@@ -166,6 +166,7 @@ def _pytest_isolated_command(config: AppConfig, command, *, finding_id: str, pro
     settings_module = 'config.settings.test'
     if worlds_backend is not None and project_root.resolve(strict=False) == worlds_backend.resolve(strict=False):
         settings_module = str(worlds_cfg.get('test_settings_module', 'worlds_config.settings') or 'worlds_config.settings')
+    pytest_basetemp = config.control_root_path / 'current' / 'pytest-temp' / db_name
     result = [
         'python',
         str(wrapper),
@@ -175,7 +176,20 @@ def _pytest_isolated_command(config: AppConfig, command, *, finding_id: str, pro
         settings_module,
         '--project-root',
         str(project_root),
+        '--basetemp',
+        str(pytest_basetemp),
     ]
+
+    # KX-UNIVERSES-1 intentionally keeps ``konnaxion.worlds`` in the sibling
+    # Konnaxion_Worlds repository instead of vendoring it into the host.
+    # Source-level diagnostics compose both source roots even when the host
+    # virtualenv has not yet received an editable install.
+    if (
+        worlds_backend is not None
+        and worlds_backend.is_dir()
+        and project_root.resolve(strict=False) != worlds_backend.resolve(strict=False)
+    ):
+        result.extend(['--extra-pythonpath', str(worlds_backend)])
     section = kx_config(config)
     admin_host = str(section.get('test_db_admin_host', '') or '').strip()
     if admin_host:
@@ -222,13 +236,19 @@ def _pytest_probe_with_clean_db_retry(
             'isolated_test_database': True,
             'test_database_name': db_name,
             'target_reuse_db_disabled': True,
+            'isolated_pytest_basetemp': True,
         })
-        if step is not None and 'LEVELUPDIAG_DB_CLEANUP_FAILED:' in (step.output_tail or ''):
-            finding.recommendation = (
-                'The isolated pytest database could not be removed. Configure '
+        if step is not None and 'LEVELUPDIAG_DB_CLEANUP_WARN:' in (step.output_tail or ''):
+            cleanup_note = (
+                'The isolated pytest database cleanup was incomplete. Configure '
                 'konnaxion.test_db_admin_host with a direct PostgreSQL/Neon host '
                 'if the pooled endpoint retains sessions.'
             )
+            finding.data['database_cleanup_warning'] = True
+            if finding.recommendation:
+                finding.recommendation = f"{finding.recommendation} Separately: {cleanup_note}"
+            else:
+                finding.recommendation = cleanup_note
         return finding, step
 
     # Compatibility fallback for custom pytest launchers that cannot be

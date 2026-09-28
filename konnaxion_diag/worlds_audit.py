@@ -115,11 +115,21 @@ def audit_worlds(frontend: Path, backend: Path, worlds_repo: Path | None = None)
         host_root / "docs" / "Technical-Reference" / "Worlds",
     )
     forbidden_engine_paths = (
-        engine_repo / "frontend" / "components" / "worlds" / "WorldSwitcher.tsx",
-        engine_repo / "frontend" / "components" / "worlds" / "WorldViewAsSwitcher.tsx",
-        engine_repo / "frontend" / "lib" / "worlds.ts",
+        engine_repo / "frontend",
     )
-    forbidden_present = [str(path) for path in (*forbidden_host_paths, *forbidden_engine_paths) if path.exists()]
+    engine_namespace = engine_repo / "backend" / "konnaxion"
+    engine_namespace_extras = []
+    if engine_namespace.is_dir():
+        engine_namespace_extras = [
+            child
+            for child in engine_namespace.iterdir()
+            if child.name not in {"worlds", "__pycache__"}
+        ]
+    forbidden_present = [
+        str(path)
+        for path in (*forbidden_host_paths, *forbidden_engine_paths, *engine_namespace_extras)
+        if path.exists()
+    ]
 
     worlds_ts = _text(host_files["frontend_worlds_lib"])
     context_tsx = _text(host_files["frontend_world_context"])
@@ -386,10 +396,16 @@ def audit_worlds(frontend: Path, backend: Path, worlds_repo: Path | None = None)
             host_guard_py,
             ("Konnaxion_Worlds", "backend", "konnaxion", "worlds", "Technical-Reference"),
         ),
-        "engine_does_not_vendor_product_frontend": not any(path.exists() for path in forbidden_engine_paths),
+        "engine_does_not_vendor_product_frontend": not (engine_repo / "frontend").exists(),
+        "engine_namespace_is_worlds_only": not engine_namespace_extras,
         "engine_boundary_guard": _has_all(
             engine_guard_py,
-            ("Konnaxion_Worlds repository boundary", "frontend/components/worlds/WorldSwitcher.tsx"),
+            (
+                "Konnaxion_Worlds repository boundary",
+                "ENGINE_ALLOWED_CHILDREN",
+                'ROOT / "frontend"',
+                "backend/konnaxion contains only worlds",
+            ),
         ),
     }
 
