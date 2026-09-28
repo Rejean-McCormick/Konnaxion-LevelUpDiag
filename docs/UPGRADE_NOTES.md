@@ -57,3 +57,15 @@ which reuses the target application's configured PostgreSQL host.
 ## 2026-09-24 — isolated pytest project-root fix
 
 The isolated Django pytest wrapper now receives the Konnaxion backend as an explicit `--project-root`, prepends it to `sys.path`/`PYTHONPATH`, and changes into that directory before importing `config.settings.test`. This fixes `ModuleNotFoundError: No module named 'config'` when the wrapper itself lives under `LevelUpDiag/scripts`.
+
+## 3.4.0 — KX-UNIVERSES-1 split-repository alignment (2026-09-28)
+
+- `world-switch` now means Universe/World qualification while retaining the old campaign name for compatibility.
+- Added sibling `Konnaxion_Worlds` discovery through `konnaxion.worlds.repo_dir`.
+- N01 validates that Konnaxion does not vendor the engine/spec and executes both repositories' anti-overlap guards.
+- N02/N10 execute engine tests from `Konnaxion_Worlds/backend`, not the Konnaxion backend.
+- Isolated Django pytest selection now uses `worlds_config.settings` for engine tests and `config.settings.test` for product tests.
+- Static contracts require `Universe`, memberships, relations, publications, subscriptions, migration `0004_universes`, canonical `/u/<universe>/w/<world>` routing and Universe response headers.
+- N05 probes the Universe catalog read-only and optionally validates a canonical Universe/World runtime route.
+- Default architecture lock changed from `KX-WORLDS-1` to `KX-UNIVERSES-1`.
+

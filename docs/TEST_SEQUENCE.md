@@ -26,7 +26,7 @@ N11 is intentionally last. It reads only the current campaign's expected levels 
 
 `auth-debug` now includes N07 so a green auth campaign requires both the static contract and the target backend's common-auth policy tests.
 
-`world-switch-validation` runs `world-switch → full-local` and stops if the focused Worlds qualification fails.
+`world-switch-validation` runs `world-switch → full-local` and stops if the focused `KX-UNIVERSES-1` two-repository qualification fails.
 
 ### Backend pytest database isolation
 
@@ -34,3 +34,7 @@ Backend Django pytest probes are intentionally **not** allowed to inherit Konnax
 `--reuse-db` setting. LevelUpDiag assigns one ephemeral PostgreSQL test database per
 run/probe and cleans it after the probe. N02, N04 OpenAPI tests, N06 Celery tests, N07
 Konnaxion auth tests, and N10 therefore cannot share test rows or migration state.
+
+### Universe/World repository split
+
+During `world-switch`, Konnaxion-owned checks run from the normal target repository. Engine tests and deep isolation/invariant tests run from `konnaxion.worlds.repo_dir/backend` (default sibling `../Konnaxion_Worlds/backend`). N01 also executes both anti-overlap guards.

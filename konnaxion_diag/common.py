@@ -60,10 +60,14 @@ def _path_from(config: AppConfig, value: str | None, *, base: Path | None = None
 def target_paths(config: AppConfig) -> dict[str, Path | None]:
     section = kx_config(config)
     target = config.target_root_path
+    worlds = section.get("worlds", {}) if isinstance(section.get("worlds", {}), dict) else {}
+    worlds_repo = _path_from(config, worlds.get("repo_dir", "../Konnaxion_Worlds"), base=target)
     return {
         "root": target,
         "frontend": _path_from(config, section.get("frontend_dir", "frontend"), base=target),
         "backend": _path_from(config, section.get("backend_dir", "backend"), base=target),
+        "worlds_repo": worlds_repo,
+        "worlds_backend": (worlds_repo / "backend").resolve(strict=False) if worlds_repo else None,
         "capsule_manager": _path_from(config, section.get("capsule_manager_repo"), base=config.diagnostics_root_path),
         "capsule_file": _path_from(config, section.get("capsule_file"), base=config.diagnostics_root_path),
     }

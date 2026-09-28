@@ -1,6 +1,6 @@
-# Existing Konnaxion diagnostic surfaces mapped by the Mega Pack
+# Existing Konnaxion diagnostic surfaces mapped by LevelUpDiag
 
-The pack is designed around the current snapshots supplied on 2026-09-02.
+The pack maps the current split Konnaxion + Konnaxion_Worlds architecture.
 
 ## Konnaxion repository
 
@@ -27,3 +27,11 @@ The pack is designed around the current snapshots supplied on 2026-09-02.
 - `KX_Diagnose_Online.ps1` can be configured as `konnaxion.commands.remote_deep_diagnostic` -> N09
 
 The pack does not deploy, restart, restore, mutate instances, or expose secrets.
+
+## Konnaxion_Worlds repository
+
+- `scripts/check_repo_boundaries.py` -> N01 ownership boundary
+- `backend/worlds_manage.py check` / engine Django environment -> N02 support
+- `backend/konnaxion/worlds/tests` -> N02 focused engine suite
+- `test_multiworld_isolation.py`, `test_universes.py`, `test_strict_routing.py` -> N10 focused isolation/invariant qualification
+- `docs/Technical-Reference/Worlds/20_UNIVERSES.md` + `AI_LOCK.yaml` -> N04 static architecture contract

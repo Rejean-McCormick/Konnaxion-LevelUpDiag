@@ -347,7 +347,7 @@
       ]
     },
     "world-switch": {
-      "description": "World-aware validation of routing, sidebar ownership, API scoping, runtime headers, fail-closed data plane, jobs and multi-World isolation.",
+      "description": "Universe/World-aware validation of two-repository ownership, canonical routing, switchers, API scoping, runtime Universe/World/Release headers, fail-closed data plane, jobs and isolation invariants.",
       "execution": "sequential",
       "levels": [
         "N00",
@@ -375,7 +375,7 @@
       "continue_on_failure": true
     },
     "world-switch-validation": {
-      "description": "Focused Worlds qualification followed by the broad local regression campaign.",
+      "description": "Focused KX-UNIVERSES-1 qualification followed by the broad local regression campaign.",
       "campaigns": [
         "world-switch",
         "full-local"

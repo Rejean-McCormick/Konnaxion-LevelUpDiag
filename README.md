@@ -15,10 +15,14 @@ and the historical workspace layout:
 ```text
 <workspace>/
 ├── LevelUpDiag/
-└── Konnaxion/
-    ├── frontend/
+├── Konnaxion/
+│   ├── frontend/
+│   └── backend/
+└── Konnaxion_Worlds/
     └── backend/
 ```
+
+`Konnaxion` remains the primary target. `Konnaxion_Worlds` is resolved separately through `konnaxion.worlds.repo_dir` (default `../Konnaxion_Worlds`).
 
 It scores Konnaxion markers (`frontend`, `backend`, `package.json`, `manage.py`) and selects the correct target automatically.
 
@@ -114,88 +118,9 @@ Les noms LevelUpDiag v3 sont désormais les seules entrées d'installation/confi
 
 The `auth-debug` campaign now validates the Konnaxion common identity implementation. It does not require OIDC to be enabled: federation is optional by design. It requires the OIDC capability to be correctly declared while local django-allauth login remains available.
 
-## 3.2 — Konnaxion Worlds / World Switch validation
+## 3.2 — Historical Worlds qualification
 
-LevelUpDiag is now World-aware without changing the N00..N11 taxonomy.
-
-Run the focused qualification campaign after applying the Konnaxion World Switch overlay:
-
-```powershell
-python levelupdiag.py run world-switch
-```
-
-Exact sequence:
-
-```text
-N00 -> N01 -> N02 -> N03 -> N04 -> N05 -> N06 -> N07 -> N10 -> N11
-```
-
-### Isolated backend pytest databases
-
-LevelUpDiag does not inherit Konnaxion's project-level `--reuse-db` setting for Django pytest probes. N02, N04 OpenAPI tests, N06 Celery tests, N07 Konnaxion auth tests, and N10 run with a LevelUpDiag-owned ephemeral PostgreSQL database name that is unique per campaign run and probe. The wrapper terminates remaining sessions and drops that database in a `finally` cleanup path.
-
-For Neon installations where database create/drop administration must use an unpooled endpoint, set the optional override in `levelupdiag.config.local.json`:
-
-```json
-{
-  "konnaxion": {
-    "test_db_admin_host": "your-direct-postgresql-host"
-  }
-}
-```
-
-Leave it unset/empty to reuse the application's configured database host.
-
-The campaign validates:
-
-- `/w/<world>/...` URL ownership and Next rewrite/carry-over safety net;
-- current sidebar ownership, including `/konsensus -> ethiKos` and `?sidebar=` preservation tests;
-- World-aware API scoping and global/control-plane exclusions;
-- stale World/Release response protection;
-- Django World middleware ordering and immutable `WorldRuntime` context;
-- transaction-local PostgreSQL `search_path`;
-- `X-Konnaxion-World*` response headers;
-- data-plane fail-closed defaults and the `WORLD_DATA_PLANE_NOT_READY` 503 sentinel;
-- release-pinned background task scope;
-- frontend World helper/suite tests and backend Worlds tests;
-- Alpha/Beta multi-World schema/release isolation in N10.
-
-Control-plane liveness/readiness are probed read-only during N05. By default LevelUpDiag does **not** create or promote a World. To add a concrete end-to-end runtime/header probe after you already have a promoted local test World, set this in `levelupdiag.config.local.json`:
-
-```json
-{
-  "konnaxion": {
-    "worlds": {
-      "runtime_probe_world_key": "demo-alpha"
-    }
-  }
-}
-```
-
-When a runtime World is configured, N05 also compares the returned World/Release payload to the `X-Konnaxion-World` and `X-Konnaxion-World-Release-Id` headers and checks that data-plane behavior matches the advertised capability state.
-
-For a focused qualification followed by the broad local regression suite:
-
-```powershell
-python levelupdiag.py run-sequence world-switch-validation
-```
-
-Windows shortcut: `RUN_KONNAXION_WORLD_SWITCH.bat` (or `launchers/KX-world-switch.bat`).
-
-## 3.2.1 — Focused Worlds qualification and immediate triage
-
-`world-switch` is now intentionally focused. It no longer reruns the generic platform smoke suite, full ESLint/Jest sweep, full Playwright smoke gate, full frontend deep scan, or full backend pytest suite. Those remain in `full-local`, which `world-switch-validation` runs only after the focused Worlds campaign passes.
-
-This removes duplicate long-running work and makes a failing Worlds campaign easier to interpret.
-
-After any run, print actionable findings from the retained current evidence with:
-
-```powershell
-python levelupdiag.py triage-current
-```
-
-Non-PASS findings are also printed immediately after each level in the console, with a concise evidence tail.
-
+v3.2 introduced the `world-switch` campaign and the first World-scoping checks. That architecture assumed the Worlds engine lived inside the Konnaxion backend. **That ownership model is superseded by v3.4 / `KX-UNIVERSES-1`.** The campaign name is retained as a compatibility alias, but current qualification follows the split-repository model documented below.
 
 ## 3.2.2 — Accurate sequence verdicts and target-protection visibility
 
@@ -225,3 +150,71 @@ N03 performs catalog alignment, placeholder parity, CSS/styled-jsx safety and st
 ### v3.3.3 focused i18n isolation
 
 `i18n-validation` treats the worker `LEVELUPDIAG_CAMPAIGN` as authoritative. N05 only ensures the frontend runtime is available and executes the dedicated FR/EN browser-switch probe. It does not run the generic Ethikos Playwright smoke, Ethikos seed, backend readiness, or Worlds runtime probe. `doctor` prints the effective `suite_version`.
+
+## 3.4.0 — KX-UNIVERSES-1 / split Universe-World qualification
+
+LevelUpDiag now validates the architecture actually used by Konnaxion:
+
+```text
+Konnaxion
+  owns: product frontend + Universe/World switcher + host adapters
+       │
+       └── consumes installed package
+             │
+Konnaxion_Worlds
+  owns: Universe → World → WorldRelease engine, migrations, control plane and canonical spec
+```
+
+The focused campaign remains:
+
+```powershell
+python levelupdiag.py run world-switch
+```
+
+It now validates all of the following:
+
+- the sibling `Konnaxion_Worlds` repository is present and packageable;
+- Konnaxion **does not** contain `backend/konnaxion/worlds` or the canonical `docs/Technical-Reference/Worlds` tree;
+- both repository boundary guards execute successfully;
+- Konnaxion extends the `konnaxion` namespace so the separately installed `konnaxion.worlds` package is importable;
+- the browser shell supports the canonical `/u/<universe>/w/<world>/...` route and temporary `/w/<world>/...` compatibility route;
+- Universe and World switching use strong navigation and preserve query/hash state;
+- API and WebSocket paths carry Universe + World context;
+- stale responses are rejected using Universe + World + Release identity;
+- `Konnaxion_Worlds` contains the `Universe`, `UniverseMembership`, `WorldRelation`, `WorldPublication` and `WorldSubscription` model primitives plus migration `0004_universes`;
+- runtime context is immutable and includes `universe_id`, `universe_key`, `world_id` and `release_id`;
+- PostgreSQL search-path scoping remains transaction-local;
+- middleware emits `X-Konnaxion-Universe`, `X-Konnaxion-World` and release headers;
+- cross-Universe relations/subscriptions and publication provenance are covered by engine tests;
+- task execution stays pinned to `world_id + release_id`;
+- the disabled product data plane continues to fail closed.
+
+### Runtime probe configuration
+
+The read-only N05 probe verifies control-plane liveness/readiness plus `control/universes/`. It never creates, promotes or mutates a Universe/World. To probe an existing promoted World through the canonical route:
+
+```json
+{
+  "konnaxion": {
+    "worlds": {
+      "repo_dir": "../Konnaxion_Worlds",
+      "architecture_lock": "KX-UNIVERSES-1",
+      "runtime_probe_universe_key": "mine-alpha",
+      "runtime_probe_world_key": "engineering"
+    }
+  }
+}
+```
+
+N05 then calls `/api/u/mine-alpha/w/engineering/runtime/` and requires the payload and response headers to agree on Universe, World and Release. If only `runtime_probe_world_key` is configured, the legacy `/api/w/<world>/runtime/` compatibility path may still be probed during U1.
+
+### Backend test ownership
+
+Konnaxion application checks still run from `Konnaxion/backend`. Universe/World engine tests run from `Konnaxion_Worlds/backend` with `worlds_config.settings`. The isolated pytest wrapper therefore selects the Django settings module according to the repository being tested rather than assuming every Django test belongs to Konnaxion.
+
+For full qualification plus product regression:
+
+```powershell
+python levelupdiag.py run-sequence world-switch-validation
+```
+

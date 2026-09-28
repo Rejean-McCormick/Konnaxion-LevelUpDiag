@@ -87,8 +87,9 @@ def _worlds_report(config: AppConfig) -> dict[str, Any]:
     paths = target_paths(config)
     frontend = paths["frontend"]
     backend_dir = paths["backend"]
+    worlds_repo = paths.get("worlds_repo")
     assert frontend is not None and backend_dir is not None
-    return audit_worlds(frontend, backend_dir)
+    return audit_worlds(frontend, backend_dir, worlds_repo=worlds_repo)
 
 
 def _worlds_enabled_for_check(config: AppConfig, report: dict[str, Any] | None = None) -> bool:
@@ -158,13 +159,20 @@ def _pytest_isolated_command(config: AppConfig, command, *, finding_id: str, pro
         return None
 
     db_name = _pytest_isolated_db_name(finding_id)
+    paths = target_paths(config) if hasattr(config, 'target_root_path') else {}
+    worlds_backend = paths.get('worlds_backend')
+    section = kx_config(config)
+    worlds_cfg = section.get('worlds', {}) if isinstance(section.get('worlds', {}), dict) else {}
+    settings_module = 'config.settings.test'
+    if worlds_backend is not None and project_root.resolve(strict=False) == worlds_backend.resolve(strict=False):
+        settings_module = str(worlds_cfg.get('test_settings_module', 'worlds_config.settings') or 'worlds_config.settings')
     result = [
         'python',
         str(wrapper),
         '--db-name',
         db_name,
         '--settings',
-        'config.settings.test',
+        settings_module,
         '--project-root',
         str(project_root),
     ]
@@ -301,6 +309,17 @@ def discovery(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         severity = PASS if path and path.is_dir() else CONFIG_ERROR
         findings.append(Finding(f"kx.discovery.{key}", severity, f"{key} directory {'found' if severity == PASS else 'missing'}.", "discovery", path=str(path)))
 
+    worlds_repo = paths.get("worlds_repo")
+    worlds_severity = PASS if worlds_repo and worlds_repo.is_dir() else (CONFIG_ERROR if _worlds_required(config) else WARN)
+    findings.append(Finding(
+        "kx.discovery.worlds-repo",
+        worlds_severity,
+        "Sibling Konnaxion_Worlds repository found." if worlds_severity == PASS else "Sibling Konnaxion_Worlds repository is missing.",
+        "worlds",
+        path=str(worlds_repo) if worlds_repo else None,
+        recommendation=None if worlds_severity == PASS else "Set konnaxion.worlds.repo_dir to the canonical Konnaxion_Worlds repository.",
+    ))
+
     tools = ["git", "node", "pnpm"]
     for name in tools:
         resolved = _find_tool(name)
@@ -332,16 +351,27 @@ def repository_static(config: AppConfig, level_id: str, level_name: str) -> Leve
     worlds = _worlds_report(config)
     if _worlds_enabled_for_check(config, worlds):
         missing = worlds.get("missing_files", [])
+        forbidden = worlds.get("forbidden_present", [])
+        bad = bool(missing or forbidden)
         findings.append(Finding(
             "kx.worlds.installation",
-            FAIL if missing else PASS,
-            "Konnaxion Worlds integration surfaces are complete." if not missing else f"Konnaxion Worlds integration is incomplete: {len(missing)} required surface(s) missing.",
+            FAIL if bad else PASS,
+            "Konnaxion host + Konnaxion_Worlds split ownership is complete." if not bad else f"Universe/World installation is incomplete or overlapping: {len(missing)} missing, {len(forbidden)} forbidden surface(s).",
             "worlds",
             evidence=summarize_worlds_audit(worlds),
-            recommendation="Apply/repair the WorldSwitch overlay before running the world-switch campaign." if missing else None,
+            recommendation="Restore the KX-UNIVERSES-1 two-repository boundary before running world-switch." if bad else None,
         ))
+        for finding_id, label, cwd, script in (
+            ("kx.worlds.host-ownership-guard", "Konnaxion Universe/World ownership guard", root, root / "scripts" / "check_worlds_ownership.py"),
+            ("kx.worlds.engine-boundary-guard", "Konnaxion_Worlds repository boundary guard", paths.get("worlds_repo"), (paths.get("worlds_repo") / "scripts" / "check_repo_boundaries.py") if paths.get("worlds_repo") else None),
+        ):
+            if cwd and script and script.is_file():
+                finding, step = command_probe(config, finding_id=finding_id, label=label, command=["python", str(script)], cwd=cwd, timeout=60, optional=not _worlds_required(config))
+                findings.append(finding)
+            else:
+                findings.append(Finding(finding_id, FAIL if _worlds_required(config) else WARN, f"{label} is unavailable.", "worlds", path=str(script) if script else None))
     else:
-        findings.append(Finding("kx.worlds.installation", SKIP, "Konnaxion Worlds integration is not detected; Worlds-specific repository checks skipped.", "worlds"))
+        findings.append(Finding("kx.worlds.installation", SKIP, "Universe/World integration is not detected; focused checks skipped.", "worlds"))
 
     git_cmd = ["git", "status", "--short"]
     finding, step = command_probe(config, finding_id="kx.repo.git-status", label="Git status", command=git_cmd, cwd=root, timeout=60, optional=True)
@@ -378,10 +408,10 @@ def backend(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
             finding_id="kx.worlds.backend-tests",
             label="Konnaxion Worlds backend tests",
             command=cmd,
-            cwd=backend_dir,
+            cwd=target_paths(config).get("worlds_backend") or backend_dir,
             timeout=900,
             optional=not _worlds_required(config),
-            recommendation="Run the bundled konnaxion/worlds test suite and resolve resolver/schema/release isolation failures.",
+            recommendation="Run the canonical Konnaxion_Worlds engine test suite and resolve Universe/World/Release invariant failures.",
         )
         findings.append(finding)
         if step: outputs.append(f"## Konnaxion Worlds backend tests\n{step.output_tail}")
@@ -700,7 +730,7 @@ def contracts(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
             evidence=str(legacy_literals[:40]),
             recommendation="Normalize legacy call-sites onto the canonical World-aware API client over time; the verified same-origin middleware currently protects them." if protected and legacy_literals else ("Restore the World API scoping safety net before accepting legacy unscoped calls." if legacy_literals else None),
         ))
-        for group in ("frontend", "backend", "jobs"):
+        for group in ("frontend", "host", "engine", "ownership", "jobs"):
             values = worlds.get(group, {})
             failed = [name for name, ok in values.items() if not ok]
             findings.append(Finding(
@@ -1065,17 +1095,19 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
 
     worlds = _worlds_report(config)
     if _worlds_enabled_for_check(config, worlds):
-        backend_contract = worlds.get("backend", {})
-        security_keys = (
-            "middleware_after_auth",
-            "transaction_local_search_path",
-            "unscoped_api_enforcement",
-            "data_plane_default_off",
-            "scoped_api_default_off",
-            "data_plane_fail_closed_503",
-            "response_world_headers",
-        )
-        failed = [key for key in security_keys if not backend_contract.get(key)]
+        host_contract = worlds.get("host", {})
+        engine_contract = worlds.get("engine", {})
+        security_checks = {
+            "host.middleware_after_auth": host_contract.get("middleware_after_auth"),
+            "host.data_plane_default_off": host_contract.get("data_plane_default_off"),
+            "host.scoped_api_default_on": host_contract.get("scoped_api_default_on"),
+            "host.data_plane_fail_closed_503": host_contract.get("data_plane_fail_closed_503"),
+            "engine.transaction_local_search_path": engine_contract.get("transaction_local_search_path"),
+            "engine.response_context_headers": engine_contract.get("response_context_headers"),
+            "engine.canonical_and_legacy_runtime_routing": engine_contract.get("canonical_and_legacy_runtime_routing"),
+        }
+        failed = [key for key, ok in security_checks.items() if not ok]
+        security_keys = tuple(security_checks)
         findings.append(Finding(
             "kx.worlds.security.fail-closed",
             FAIL if failed else PASS,
@@ -1192,7 +1224,7 @@ def correlation(config: AppConfig, level_id: str, level_name: str) -> LevelResul
     if any(x.startswith("kx.contract.") for x in ids): hypotheses.append("frontend↔backend API contract mismatch")
     if any(x.startswith("kx.runtime.") for x in ids): hypotheses.append("local runtime/browser smoke failure")
     if any(x.startswith("kx.jobs.") for x in ids): hypotheses.append("Celery/Redis/background-job failure")
-    if any(x.startswith("kx.worlds.") for x in ids): hypotheses.append("Konnaxion Worlds routing/isolation/release failure")
+    if any(x.startswith("kx.worlds.") for x in ids): hypotheses.append("Konnaxion Universe/World routing, ownership, isolation or release failure")
     if any(x.startswith("kx.capsule.") for x in ids): hypotheses.append("capsule packaging/runtime-manager failure")
     if any(x.startswith("kx.remote.") for x in ids): hypotheses.append("deployed DNS/HTTP/Agent/runtime failure")
     if failures:
@@ -1260,14 +1292,18 @@ def deep_scan(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     worlds = _worlds_report(config)
     if _worlds_enabled_for_check(config, worlds):
         cmd = command_value(config, "backend_worlds_isolation_tests") or [
-            "python", "-m", "pytest", "konnaxion/worlds/tests/test_multiworld_isolation.py", "-q"
+            "python", "-m", "pytest",
+            "konnaxion/worlds/tests/test_multiworld_isolation.py",
+            "konnaxion/worlds/tests/test_universes.py",
+            "konnaxion/worlds/tests/test_strict_routing.py",
+            "-q",
         ]
         finding, step = _pytest_probe_with_clean_db_retry(
             config,
             finding_id="kx.worlds.deep-isolation",
-            label="Multi-World isolation test",
+            label="Universe/World isolation + invariant tests",
             command=cmd,
-            cwd=backend_dir,
+            cwd=paths.get("worlds_backend") or backend_dir,
             timeout=900,
             optional=not _worlds_required(config),
             recommendation="Validate Alpha/Beta schema and release isolation on PostgreSQL before enabling the data plane.",

@@ -172,6 +172,8 @@
         "-m",
         "pytest",
         "konnaxion/worlds/tests/test_multiworld_isolation.py",
+        "konnaxion/worlds/tests/test_universes.py",
+        "konnaxion/worlds/tests/test_strict_routing.py",
         "-q"
       ],
       "frontend_i18n_check": [
@@ -190,11 +192,14 @@
       "deep_timeout_seconds": 1800
     },
     "worlds": {
-      "architecture_lock": "KX-WORLDS-1",
+      "architecture_lock": "KX-UNIVERSES-1",
       "backend_api_base_url": "",
       "http_timeout_seconds": 5,
       "runtime_probe_world_key": "",
-      "data_plane_probe_path": "ethikos/"
+      "data_plane_probe_path": "ethikos/",
+      "repo_dir": "../Konnaxion_Worlds",
+      "test_settings_module": "worlds_config.settings",
+      "runtime_probe_universe_key": ""
     },
     "i18n_browser_probe_path": "/ekoh/dashboard?sidebar=ekoh",
     "i18n_browser_probe_timeout_seconds": 180,
