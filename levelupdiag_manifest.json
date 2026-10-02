@@ -1,9 +1,9 @@
 {
   "schema": "levelupdiag.manifest.v2",
   "standard": "LevelUpDiag",
-  "standard_version": "2.2.0-konnaxion",
-  "suite_name": "Konnaxion LevelUpDiag — Upgraded",
-  "suite_version": "3.3.4",
+  "standard_version": "2.1.0-konnaxion-security",
+  "suite_name": "Konnaxion LevelUpDiag \u2014 Upgraded",
+  "suite_version": "2.1.0-konnaxion-security",
   "repository_mode": "copy-in-or-standalone-diagnostics-suite",
   "control_dir_default": ".levelupdiag",
   "retention_default": "current_only",
@@ -125,7 +125,7 @@
       ],
       "timeout_seconds": 900,
       "parallel_safe": false,
-      "purpose": "Validate Django deployment security plus the Konnaxion standalone-first allauth/OIDC authentication contract."
+      "purpose": "Require Django auth/deploy checks, SecurityDiag S04 web-trust PASS evidence, World isolation security and Capsule Manager security-gate tests."
     },
     {
       "id": "N08",
@@ -190,7 +190,7 @@
   ],
   "campaigns": {
     "source-audit": {
-      "description": "Static repository and frontend↔backend contract audit before runtime checks.",
+      "description": "Static repository and frontend\u2194backend contract audit before runtime checks.",
       "execution": "sequential",
       "levels": [
         "N00",

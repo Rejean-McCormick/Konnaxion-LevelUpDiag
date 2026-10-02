@@ -13,7 +13,7 @@ from konnaxion_diag.checks import run_domain
 
 LEVEL_ID = "N07"
 LEVEL_NAME = "Security & Auth"
-PURPOSE = "Run Django deploy checks and Capsule Manager security-gate tests."
+PURPOSE = "Run Django auth/deploy checks, SecurityDiag S04 web-trust qualification, World isolation checks and Capsule Manager security-gate tests."
 
 def run(config: AppConfig | None = None):
     cfg = load_config() if config is None else config

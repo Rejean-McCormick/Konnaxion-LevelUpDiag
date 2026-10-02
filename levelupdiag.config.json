@@ -190,7 +190,8 @@
         "run",
         "i18n:check"
       ],
-      "i18n_browser_probe": []
+      "i18n_browser_probe": [],
+      "securitydiag_web_trust": []
     },
     "remote": {
       "enabled": false,
@@ -214,7 +215,9 @@
     },
     "i18n_browser_probe_path": "/ekoh/dashboard?sidebar=ekoh",
     "i18n_browser_probe_timeout_seconds": 180,
-    "i18n_browser_probe_required": true
+    "i18n_browser_probe_required": true,
+    "securitydiag_repo": "../SecurityDiag",
+    "securitydiag_required": true
   },
   "execution": {
     "mode": "sequential",

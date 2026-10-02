@@ -62,6 +62,20 @@ def target_paths(config: AppConfig) -> dict[str, Path | None]:
     target = config.target_root_path
     worlds = section.get("worlds", {}) if isinstance(section.get("worlds", {}), dict) else {}
     worlds_repo = _path_from(config, worlds.get("repo_dir", "../Konnaxion_Worlds"), base=target)
+
+    explicit_securitydiag = section.get("securitydiag_repo")
+    securitydiag = _path_from(config, explicit_securitydiag, base=config.diagnostics_root_path) if explicit_securitydiag else None
+    if securitydiag is None or not (securitydiag / "securitydiag.py").is_file():
+        securitydiag = None
+        for candidate in (
+            target / "securitydiag",
+            config.diagnostics_root_path.parent / "SecurityDiag",
+            config.diagnostics_root_path.parent / "securitydiag",
+        ):
+            if (candidate / "securitydiag.py").is_file():
+                securitydiag = candidate.resolve(strict=False)
+                break
+
     return {
         "root": target,
         "frontend": _path_from(config, section.get("frontend_dir", "frontend"), base=target),
@@ -70,6 +84,7 @@ def target_paths(config: AppConfig) -> dict[str, Path | None]:
         "worlds_backend": (worlds_repo / "backend").resolve(strict=False) if worlds_repo else None,
         "capsule_manager": _path_from(config, section.get("capsule_manager_repo"), base=config.diagnostics_root_path),
         "capsule_file": _path_from(config, section.get("capsule_file"), base=config.diagnostics_root_path),
+        "securitydiag": securitydiag,
     }
 
 

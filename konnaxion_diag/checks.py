@@ -1092,6 +1092,91 @@ def jobs(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     return make_result(level_id,level_name,started,findings,output="\n".join(outputs),metadata={**session_metadata(config),"cwd":str(backend_dir),"worlds":worlds})
 
 
+
+def _securitydiag_web_trust_gate(config: AppConfig, paths: dict[str, Path | None]):
+    """Run SecurityDiag S04 and require fresh PASS application-security evidence."""
+    securitydiag = paths.get("securitydiag")
+    root = paths["root"]
+    assert root is not None
+    required = bool(kx_config(config).get("securitydiag_required", True))
+
+    if securitydiag is None or not (securitydiag / "securitydiag.py").is_file():
+        severity = FAIL if required else WARN
+        return Finding(
+            "kx.security.securitydiag-web-trust",
+            severity,
+            "SecurityDiag S04 web-trust gate is unavailable.",
+            "security",
+            recommendation="Install/configure SecurityDiag and rerun N07 before release.",
+        ), None
+
+    command = command_value(config, "securitydiag_web_trust") or [
+        "python", str(securitydiag / "securitydiag.py"), "run", "S04", "--target", str(root)
+    ]
+    probe, step = command_probe(
+        config,
+        finding_id="kx.security.securitydiag-run",
+        label="SecurityDiag S04 web trust qualification",
+        command=command,
+        cwd=securitydiag,
+        timeout=600,
+        optional=not required,
+        recommendation="Fix SecurityDiag S04 findings before release.",
+    )
+
+    if probe.severity != PASS:
+        return Finding(
+            "kx.security.securitydiag-web-trust",
+            FAIL if required else WARN,
+            "SecurityDiag S04 execution did not complete successfully.",
+            "security",
+            evidence=f"runner={probe.severity}",
+            recommendation="Fix the SecurityDiag execution failure before trusting cached evidence.",
+        ), step
+
+    evidence_path = root / ".securitydiag" / "latest" / "levels" / "S04" / "result.json"
+    if not evidence_path.is_file():
+        return Finding(
+            "kx.security.securitydiag-web-trust",
+            FAIL if required else WARN,
+            "SecurityDiag did not produce fresh S04 evidence.",
+            "security",
+            path=str(evidence_path),
+            recommendation="Run SecurityDiag S04 successfully and require verdict PASS.",
+        ), step
+    try:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return Finding(
+            "kx.security.securitydiag-web-trust",
+            FAIL,
+            "SecurityDiag S04 evidence is unreadable.",
+            "security",
+            path=str(evidence_path),
+            evidence=f"{type(exc).__name__}: {exc}",
+        ), step
+
+    verdict = str(payload.get("verdict", "UNKNOWN"))
+    evidence_target = str(payload.get("target_repo_root", ""))
+    target_matches = not evidence_target or Path(evidence_target).resolve(strict=False) == root.resolve(strict=False)
+    blockers = [
+        item.get("id")
+        for item in payload.get("findings", [])
+        if item.get("verdict") in {"FAIL", "BLOCKED", "ERROR", "CONFIG_ERROR", "INFRA_ERROR"}
+        or item.get("release_blocker") is True
+    ]
+    ok = verdict == "PASS" and not blockers and target_matches
+    return Finding(
+        "kx.security.securitydiag-web-trust",
+        PASS if ok else FAIL,
+        "SecurityDiag S04 web-trust evidence is PASS with no blockers."
+        if ok else "SecurityDiag S04 web-trust evidence is not release-clean.",
+        "security",
+        path=str(evidence_path),
+        evidence=f"verdict={verdict}; blockers={blockers}; target_matches={target_matches}",
+        recommendation=None if ok else "Resolve all S04 blockers and rerun N07.",
+    ), step
+
 def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
     started=now(); paths=target_paths(config); findings=[]; outputs=[]; backend_dir=paths["backend"]; assert backend_dir is not None
     cmd=command_value(config,"django_deploy_check") or ["python","manage.py","check","--deploy"]
@@ -1110,6 +1195,10 @@ def security(config: AppConfig, level_id: str, level_name: str) -> LevelResult:
         optional=False,
         recommendation="Restore/run konnaxion/users/tests/test_auth_policy.py and align the local allauth/OIDC policy.",
     )
+    findings.append(finding)
+    if step: outputs.append(step.output_tail)
+
+    finding, step = _securitydiag_web_trust_gate(config, paths)
     findings.append(finding)
     if step: outputs.append(step.output_tail)
 

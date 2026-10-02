@@ -1,0 +1,58 @@
+{
+  "schema": "konnaxion.security-overlay.v1",
+  "project": "levelup",
+  "generated_at": "2026-10-02",
+  "changed_file_count": 10,
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "93cb66f3dde1d6173424e1e56a6ebd0bd2125360befb9138902051f2dee0954c",
+      "bytes": 10955
+    },
+    {
+      "path": "SECURITY_INTEGRATION_20261002.md",
+      "sha256": "942638c5b0717cc4f48e435105db8504a2be7af219c0c9886383a7c30766fb28",
+      "bytes": 274
+    },
+    {
+      "path": "konnaxion_diag/checks.py",
+      "sha256": "16a6c2f6c5823b1a31f295be30fedcdc7f13b32ada3d3154f8f8b2c6fd27ff1a",
+      "bytes": 70646
+    },
+    {
+      "path": "konnaxion_diag/common.py",
+      "sha256": "d1d9fa8ae007b50fb75e1f9b643cdd6fad1c369ba39172cddef5f0e4d4068b31",
+      "bytes": 12113
+    },
+    {
+      "path": "levels/N07_n07_konnaxion.pyw",
+      "sha256": "56664e7de8e42ec68b0f2df1046ae1cb74c16c412045fd30a7bba717c4df9874",
+      "bytes": 832
+    },
+    {
+      "path": "levelupdiag.config.example.json",
+      "sha256": "aa4d19467533c67ba4f0f914a5feb40025868d4ba277bcc34b3eade300556c83",
+      "bytes": 5115
+    },
+    {
+      "path": "levelupdiag.config.json",
+      "sha256": "d2ddce8e3d2b88a933c942f61706f9f452affed57575ba3abc4a10e687884962",
+      "bytes": 5268
+    },
+    {
+      "path": "levelupdiag_core/__init__.py",
+      "sha256": "85ed55e14271f36a6d5cf1efe25839a5df00c090c32eefc649c3ef528855b1f8",
+      "bytes": 153
+    },
+    {
+      "path": "levelupdiag_manifest.json",
+      "sha256": "f0b369d7b16ee2223ae0b9a8f34c7a4c357265f1cd0fa900f385af4e0e0d7086",
+      "bytes": 10004
+    },
+    {
+      "path": "tests/test_securitydiag_gate.py",
+      "sha256": "c9cfd17d5075be708c77010b00e2951b5f1cc18a6fc84663117f136dd5b8d28c",
+      "bytes": 2875
+    }
+  ]
+}

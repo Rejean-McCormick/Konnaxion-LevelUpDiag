@@ -233,3 +233,7 @@ Or double-click `RUN_KONNAXION_UNIVERSE_QUICK.bat`.
 This runs only `N00 -> N01 -> N11`: repository ownership/boundary checks without Django DB, OpenAPI pytest, frontend build, Playwright or deep scans.
 
 For deeper source/API qualification, `source-audit` remains available. Its isolated Django pytest wrapper now composes the sibling `Konnaxion_Worlds/backend` source root, preserving the KX-UNIVERSES-1 split without vendoring the engine back into Konnaxion.
+
+## SecurityDiag integration
+
+N07 now invokes SecurityDiag S04 against the Konnaxion target and requires fresh `PASS` web-trust evidence. Missing SecurityDiag or any S04 blocker fails N07 by default. Configure `konnaxion.securitydiag_repo` when SecurityDiag is not installed under `Konnaxion/securitydiag`.
